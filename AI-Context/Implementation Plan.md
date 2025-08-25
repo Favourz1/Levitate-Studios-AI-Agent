@@ -1,0 +1,388 @@
+# AI Agent Implementation Plan (Node.js + TypeScript, PostgreSQL, BullMQ, Vercel AI SDK, Brevo, Google Docs/Drive, Asana)
+
+Below is a **single-source blueprint** for engineering, QA, and PM to implement and operate your agent end-to-end. It’s organized by principles → architecture → data model → workflows (Steps 1–9) → async jobs → LLM design → integrations (Google, Brevo, Asana) → admin UI → observability → security → testing → rollout & ops. I’ve leaned heavily into backend detail (state, idempotency, retries, failure modes) as requested.
+
+Where the plan relies on provider behaviors or best-practice patterns, I cite authoritative docs inline.
+
+---
+
+## 1) Guiding principles (from Anthropic & practical agent ops)
+
+- **Keep the agent simple and tool-centric.** Explicit tools with clear contracts; avoid giant, monolithic prompts. Let the agent call narrow tools (doc render, email parse, Asana ops) and iterate in short loops. ([Anthropic][1])
+- **Make planning/evaluation explicit.** Use a _planning pass → execution → self-check_ loop for long tasks; log reasoning artifacts in your DB for auditability and failure triage. ([Anthropic][1])
+- **Prefer structured outputs.** Constrain LLM outputs to JSON schemas for classification & extraction (email intent, doc outline, task guides) using Vercel AI SDK’s `generateObject` and tool-calling. ([ai-sdk.dev][2])
+
+---
+
+## 2) High-level system architecture
+
+**Services (same repo, modular monolith)**
+
+- **API Gateway** (HTTP REST): Public endpoints (webhooks, action links), Admin UI backend.
+- **Agent Orchestrator**: Starts/monitors long-running jobs (BullMQ), breaks problems into tool calls, coordinates state transitions.
+- **Integrations**:
+
+  - **Google** (Forms Apps Script endpoint, Docs/Drive for content & revisions).
+  - **Brevo** (transactional send, inbound-parse webhook). ([developers.brevo.com][3])
+  - **Asana** (projects/sections/tasks, stories/comments, webhooks). ([developers.asana.com][4])
+
+- **LLM Gateway**: Vercel AI SDK configured for suitable LLM models; wrapper exposes “tools” and schema-validated outputs. ([ai-sdk.dev][5])
+- **Workers**: BullMQ consumers for document generation, Asana sync, email intent classification, etc. (sandboxed processors for stability). ([docs.bullmq.io][6])
+- **PostgreSQL** (Railway): Source of truth for clients, projects, documents, threads, jobs, webhooks, logs.
+- **Redis**: BullMQ queues, job schedulers, dedupe keys, distributed locks. ([docs.bullmq.io][7])
+- **File layer**: Google Drive is canonical for shareable docs; DB keeps normalized text snapshots for cheap/fast LLM context (details in §7).
+
+**Cross-cutting patterns**
+
+- **State machines** for project phase & document status (strong invariants, idempotent transitions).
+- **Transactional outbox** for external side effects (emails, Asana, Drive), processed by workers.
+- **Idempotency keys** on webhook deliveries, action links, and job enqueues.
+- **Backoff + retry** (429/5xx) honoring provider `Retry-After` (Asana) and reasonable exponential backoff for LLM & email APIs. ([developers.asana.com][8])
+
+---
+
+## 3) Data model (PostgreSQL)
+
+Key tables (selected columns only; use auto incrementing PKs unless noted)
+For enums listed here don't add in db level, let it be in backend level and validated before inserting in db
+:
+
+- **clients**: id, name, primary_email, status, created_at
+- **projects**: id, client_id, name, phase(enum: QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED), asana_project_gid (nullable until Step 7), created_at, updated_at
+- **project_phase_log**: id, project_id, from_phase, to_phase, reason, actor(enum: SYSTEM|USER|LLM), at
+- **documents**: id, project_id, type(enum: BRAND_ORIGIN|BUDGET_TIMELINE|BUDGET_TIMELINE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), is_variant(bool), variant_index(int|null), created_at, updated_at
+- **document_revisions**: id, document_id, drive_revision_id(nullable), snapshot_text(TEXT, gzip/base64), snapshot_md(JSONB optional), created_by(enum: AGENT|PM|FINANCE|CLIENT), created_at
+- **email_threads**: id, project_id, client_id, reply_to_address, provider_thread_id (Brevo/Message-Id), created_at
+- **emails**: id, thread_id, direction(enum: INBOUND|OUTBOUND), from_addr, to_addr, subject, raw_headers(JSONB), text_body(TEXT), html_body(TEXT), attachments_meta(JSONB), brevo_event_id, received_at, intent(enum: NONE|DOC_FEEDBACK|ACCEPT|REJECT|OFFTOPIC|OTHER), intent_confidence(NUMERIC), llm_trace_id, processed(bool)
+- **asana_links**: id, project_id, pending_board_gid (for “Pending Projects”), finalized_board_gid (for real project), sections(JSONB: name→gid), pm_gid, finance_gid, created_at
+- **asana_tasks**: id, project_id, task_gid, section_name, assignee_gid, due_on, meta(JSONB), created_at
+- **team_members**: id, name, email, asana_user_gid, roles(JSONB: \[{role, is_lead}])
+- **job_runs**: id, name, args(JSONB), status(enum: QUEUED|RUNNING|SUCCEEDED|FAILED|CANCELLED), dedupe_key, attempts, last_error(TEXT), started_at, finished_at
+- **webhook_subscriptions**: id, provider(enum: ASANA|BREVO|APPS_SCRIPT), resource_id, secret, callback_url, last_event_at, status
+- **audit_log**: id, project_id, actor, action, details(JSONB), at
+
+**Indexes**
+
+- (emails.to_addr), (emails.received_at DESC); (document_revisions.document_id, created_at DESC); (job_runs.dedupe_key UNIQUE NULLS DISTINCT); (projects.client_id, phase)
+
+---
+
+## 4) Enumerated states & transitions
+
+**Project.phase**
+
+- QUESTIONNAIRE → BRAND_ORIGIN → BUDGET_TIMELINE → FINALIZED (or REJECTED from any non-final states)
+- Transitions **only through orchestrator** (ensures one-way progress & idempotent side effects).
+
+**Document.status**
+
+- DRAFT → PM_REVIEW → SENT_TO_CLIENT → CLIENT_FEEDBACK → ACCEPTED (or REJECTED back to DRAFT)
+- Only one **active “original”** per type; “variants” are immutable (created once for Budget/Timeline).
+
+---
+
+## 5) Endpoints (public API)
+
+- **POST** `/webhooks/brevo/inbound` – inbound-parse for replies; validate auth; enqueue `EMAIL_PARSE`. ([developers.brevo.com][3])
+- **POST** `/webhooks/asana` – webhook handshake + events; verify `X-Hook-Secret` & `X-Hook-Signature`; enqueue `ASANA_SYNC`. ([developers.asana.com][9])
+- **POST** `/webhooks/apps-script/forms` – Google Forms submission relay (Apps Script `doPost` to this URL). ([Google for Developers][10], [docs.bullmq.io][11])
+- **GET** `/actions/review` – opens Admin UI with signed token linking to doc revision.
+- **POST** `/actions/send-to-client` – signed action; moves doc to SENT_TO_CLIENT; sends email.
+- **POST** `/actions/confirm-accepted` – PM/Finance click; deduped; starts next job.
+- **POST** `/admin/project/:id/accept-doc` – manual accept from UI.
+- **GET** `/healthz` – health. **GET** `/readyz` – readiness.
+
+**Action links**: sign as `?t=<JWT>` with short TTL + one-time nonce (matches `job_runs.dedupe_key`); audit log “clicked by …”.
+
+---
+
+## 6) Core workflows (Step-by-step mapping)
+
+### Step 1 — Questionnaire intake
+
+**Paths:**
+A) **Google Form** → Apps Script → our `/webhooks/apps-script/forms` → create **client**, **project** (phase=QUESTIONNAIRE), **email_thread** (reply-to reserved), add **Pending Projects** Asana task in “Filled Questionnaire”. ([Google for Developers][10], [docs.bullmq.io][11])
+B) **Uploaded filled doc** → parse on FE → prefill UI form → submit to API same as (A).
+C) **UI native form** → API same as (A).
+
+**Asana “Pending Projects”**
+
+- On first run, create project if missing, add sections: _Filled Questionnaire_, _Brand Origin Doc Phase_, _Budget/Timeline Phase_, _Finalized_, _Rejected_; persist gids; register webhook(s). ([ai-sdk.dev][12], [developers.asana.com][4])
+- Add task per intake; assign PM; store mapping in DB.
+
+**Notify PM**
+
+- Transactional email via Brevo (template with CTA “Review Brand Origin”). ([developers.brevo.com][13])
+
+### Step 2 — Brand Origin document generation
+
+- Enqueue `DOC_BRAND_ORIGIN_GENERATE` (BullMQ) with **dedupe key** `project:<id>:brand_origin:generate`.
+- Worker composes prompt/context from normalized text (questionnaire, client profile), calls model. Use structured plan → compose → self-check loop; write Drive file; create `document` & first `document_revision` (snapshot text too).
+- Move Asana task to **Brand Origin Doc Phase** (update section). Add story comment, @mention PM with links to Review / Send. ([developers.asana.com][14])
+- Email PM with buttons (Review / Send to Client).
+
+**Versioning**
+
+- For Google Docs, Drive “keepForever” **does not apply** to Docs editors; it’s for binary revisions only. Use our own immutable snapshots (text in DB) + optional duplicate file for “pinned” copies if required. ([Google for Developers][15])
+
+### Step 3 — Send to client
+
+- On PM click or Admin UI:
+
+  - Set status SENT_TO_CLIENT; send Brevo email to client with **unique reply-to** like `clients-<CLIENT_ID>-<PROJECT_ID>@levitate.ng` (configure domain in Brevo; inbound route hits our webhook). ([developers.brevo.com][3])
+  - Store outbound email in `emails` with provider ids; upsert `email_thread`.
+
+### Step 4 — Inbound replies (intent loop)
+
+- Brevo webhook posts parsed email + attachments to our endpoint → enqueue `EMAIL_PARSE`. ([developers.brevo.com][3])
+- LLM classification (structured JSON): {intent, summary, requested_changes}.
+
+  - **DOC_FEEDBACK** → status=CLIENT_FEEDBACK → enqueue regeneration job; add comment in Asana; email PM.
+  - **ACCEPT** → proceed to Step 5.
+  - **OFFTOPIC/OTHER** → log thread and do nothing (comment PM).
+
+- Every regeneration produces a new `document_revision` and fresh Drive head; keep DB snapshots authoritative.
+
+### Step 5 — Accept Brand Origin → Budget/Timeline creation
+
+- On email intent=ACCEPT **or** manual accept:
+
+  - Send **confirmation email** to PM & Finance with a single “Confirm & Create Budget/Timeline” CTA (either can click).
+  - Clicking CTA enqueues `DOC_BUDGET_TIMELINE_GENERATE` with dedupe key; set project.phase=BRAND_ORIGIN→BUDGET_TIMELINE; move Asana task to **Budget/Timeline Phase**; comment tagging PM & Finance with review/send CTAs.
+  - Generate **3 one-time variants** alongside the main Budget/Timeline doc (flag `is_variant=true`, `variant_index=1..3`); do **not** regenerate variants on later edits (only the main document).
+
+### Step 6 — Budget/Timeline feedback loop
+
+- Same as Step 4 but for Budget/Timeline doc until status=ACCEPTED. Variants remain immutable, for reference only.
+
+### Step 7 — Finalize & kick off Asana project
+
+- On accept (email intent or Admin UI):
+
+  - Move the card in “Pending Projects” to **Finalized**; send **“Finalize & Initialize Project”** CTA to PM & Finance (deduped).
+  - Enqueue `ASANA_CREATE_PROJECT` to create the **real project** with sections _To Do_, _In Progress_, _In Review_, _Completed_. Create tasks derived from the accepted Budget/Timeline breakdown; map roles to assignees (lead if multiple). Due dates = rolling offsets from initialization date.
+  - Persist `asana_project_gid`, section gids, and created task gids.
+
+### Step 8 — Task guidance comments
+
+- For each created task, generate a **15+ line guidance** comment (LLM) with concrete cues (palette, style, deliverables). Post as Asana **story**; @mention the assignee and PM for visibility. ([developers.asana.com][14])
+
+### Step 9 — Completion notice
+
+- Email Admin, Manager (if any), and PM: “Project initialized 100%.” Include links (Asana project, Docs).
+
+**Always-on sync**
+
+- Asana webhook events (moves, comments, deletes) update our DB lightly (task section, comment metadata, deletes mirrored). Handshake & signatures are verified per Asana’s webhook guide. ([developers.asana.com][9])
+
+---
+
+## 7) Document strategy (Google Drive + DB snapshots)
+
+- **Primary artifact**: Google Doc (collab-friendly).
+- **Immutable history**: Store **normalized text snapshots** per revision in `document_revisions`.
+- **Why**: Drive `keepForever` is for **binary** blobs; not reliable for Docs editors content. We therefore keep our own authoritative history and optionally duplicate Docs for “pinned” milestones if required. ([Google for Developers][15])
+- **AI context**: Pull latest snapshot text + metadata; **do not** fetch live Doc in long chains to avoid quota/latency; re-sync when saving.
+- **Merge model**: If PM edits the live Google Doc, we **export** (text/HTML) and save a new `document_revision` with diff summary (LLM generated) for audit trail.
+
+---
+
+## 8) LLM design (Vercel AI SDK)
+
+**Providers & cost-aware model routing**
+
+- **Classification / intent detection / extract fields** → small model via `generateObject` (schema) - the SDK supports tool-calling + structured outputs. ([ai-sdk.dev][2])
+- **Document drafting** (Brand Origin, Budget/Timeline) → balanced quality/cost model; allow multi-step tool loops (web search or repo lookups if needed, rules and example documents would be given in context) via AI SDK **tool calling**. ([ai-sdk.dev][16])
+
+**Tools exposed to the agent**
+
+- `readProjectContext(projectId)`, `readSnapshots(documentId)`
+- `writeDoc(type, content)`, `createVariant(...)`
+- `postAsanaComment(taskGid, html_text)` (supports `@mentions` via `html_text` with user gid). ([developers.asana.com][14])
+- `sendEmail(templateId, to, params)`
+- `advanceState(projectId, transition)` (guarded)
+
+**Execution pattern**
+
+- **Plan** (schema), **Execute** (tools), **Self-check** (schema), **Emit** (final content). Logged under `llm_trace_id`.
+- Hard token limits mitigated by chunked context (snapshots + rules + last messages).
+- Deterministic outputs via schemas; reject non-conforming JSON and auto-retry with repair instruction.
+
+---
+
+## 9) Background jobs (BullMQ + Redis)
+
+**Queues**
+
+- `doc-generation`, `email-intent`, `asana-sync`, `asana-project-init`, `notifications`, `snapshot-sync`
+
+**Job scheduler**
+
+- Use BullMQ **Job Schedulers** (v5.16+) for cron-like tasks (e.g., stale job rechecks, Drive export sweeps). ([docs.bullmq.io][7])
+
+**Reliability settings**
+
+- **Attempts** with **exponential backoff** for 429/5xx (respect `Retry-After` for Asana). ([developers.asana.com][8])
+- **Stalled jobs**: run QueueScheduler; consider sandboxed workers to isolate CPU-heavy LLM formatting. ([docs.bullmq.io][17])
+- **Idempotency**: All producers pass `dedupe_key`; workers check `job_runs` before side-effects.
+- **RemoveOnComplete/Fail** configured to retain last N for ops forensic. ([api.docs.bullmq.io][18])
+
+---
+
+## 10) Google integrations
+
+**Google Forms → Apps Script**
+
+- Create an **installable trigger** on form submit to call a **Web App** (`doPost`) which forwards structured payload to our `/webhooks/apps-script/forms`. ([Google for Developers][10], [docs.bullmq.io][11])
+
+**Drive/Docs**
+
+- Use Drive v3 `files.create/update/export` + `revisions.list`. Keep named “milestones” by duplicating file; **do not rely** on `keepForever` for Google Docs editors. ([Google for Developers][15])
+
+---
+
+## 11) Brevo email (send + inbound)
+
+- **Transactional send** with templates and dynamic params (buttons link to our action endpoints). ([developers.brevo.com][13])
+- **Inbound Parse**: configure `type: inbound`, `events: inboundEmailProcessed`, domain mapping to webhook; secure with basic/bearer and optional IP allowlist. ([developers.brevo.com][3])
+- **Dedicated reply-to** per project/thread stored in DB; match inbound by `To:` and `In-Reply-To` headers.
+
+---
+
+## 12) Asana integration
+
+- **Pending Projects** board bootstrap (if not found): create sections _Filled Questionnaire_, _Brand Origin Doc Phase_, _Budget/Timeline Phase_, _Finalized_, _Rejected_; persist gids. ([ai-sdk.dev][12])
+- **Webhooks**: create on project; complete handshake by echoing `X-Hook-Secret`; verify HMAC signatures on future events. ([developers.asana.com][4])
+- **Moves & deletes**: track section changes and deletions; mirror deletes locally (edge case #13).
+- **Comments (@mentions)** via **Stories API** with `html_text` containing `<a data-asana-gid="...">` to mention users (supports PM/Finance tagging). ([developers.asana.com][14])
+- **Rate limits**: handle 429 with `Retry-After`, gradual concurrency; backoff in worker. ([developers.asana.com][8])
+
+---
+
+## 13) Admin/Manager UI (frontend)
+
+**Screens**
+
+- **Dashboard**: all clients & projects with phase, last action, error badges; filters by PM/Finance.
+- **Project detail**: current phase, Asana links, documents & revision history (diffs), email thread, logs timeline.
+- **Document viewer**: snapshot text (read-only), open live Google Doc; actions: “Send to Client”, “Accept”, “Recreate”.
+- **Context editor**: add/update client/project context text and upload reference files (stored as text extracts).
+- **Ops**: job queue status, dead-letter, webhook subscriptions health, provider quota.
+
+**UX mechanics**
+
+- All potentially long actions **post commands** that enqueue work; UI shows a live job status feed (SSE or polling).
+- **Action links** clicked from email land here; after JWT validation, UI calls the internal action API.
+
+---
+
+## 14) Observability & audit
+
+- **Structured logs** with correlation ids: `project_id`, `job_id`, `llm_trace_id`, `provider_event_id`.
+- **Metrics**: job latency/success rate; Asana 429s; Brevo delivery/open; LLM token spend.
+- **Audit Log**: human & system actions per project for “what changed when and why”.
+
+---
+
+## 15) Security, auth, and integrity
+
+- Secrets in Railway env vars; rotate regularly.
+- **Inbound webhooks**
+
+  - Asana: handshake echo `X-Hook-Secret`; verify `X-Hook-Signature` on events; reject invalid. ([developers.asana.com][9])
+  - Brevo: use basic/bearer auth and optionally IP allowlist per docs. ([developers.brevo.com][19])
+
+- **Action links**: JWT (short TTL) + single-use nonce; capture actor info; replay-safe.
+- **PII**: store minimal email bodies; redact attachments unless whitelisted.
+
+---
+
+## 16) Error handling & retries (per integration)
+
+- **Asana**: if 429, sleep `Retry-After` seconds; if project/section not found, attempt re-bootstrap once; for 4xx validation errors, mark job unrecoverable (stop retries). ([developers.asana.com][8])
+- **Brevo**: if send error, queue retry with capped backoff; if inbound payload malformed, dead-letter and notify Admin.
+- **Drive**: quota errors → backoff; export failures → retry 3x; if Doc missing, recreate from last snapshot.
+
+---
+
+## 17) Testing strategy
+
+- **Unit**: tools, schema validation, state transitions, signature verifiers.
+- **Contract tests**: stub Asana/Brevo/Drive with fixed payloads (webhook handshake, move event, inbound email).
+- **E2E**: golden flows (Steps 1–9), rejection paths, duplicate clicks (idempotency), race tests (PM & Finance).
+- **Load**: N projects × M emails; monitor 429 handling and queue throughput.
+
+---
+
+## 18) Rollout & operations
+
+- **Phased rollout**: start with one PM + one Finance; simulate inbound emails; verify Asana sync; then enable client-facing addresses.
+- **Runbooks**:
+
+  - “Asana webhook expired” → re-create & store new secret. ([developers.asana.com][9])
+  - “Client reply not detected” → inspect `emails` row & LLM classification; force re-parse.
+  - “Drive history lost” → restore from `document_revisions` snapshot (duplicate a new Doc from snapshot).
+
+---
+
+## 19) Cost controls
+
+- Prefer **small models** for classification; reserve larger models only for longform docs; enforce token caps. ([ai-sdk.dev][2])
+- Batch Asana writes when possible; respect rate limits; collapse duplicate comments. ([developers.asana.com][8])
+- Snapshot **text only** (compressed) rather than storing PDFs for every revision.
+
+---
+
+## 20) Implementation backlog (by milestone)
+
+**M0 – Foundations (1–1.5 weeks)**
+
+- Repo scaffolding; DB migrations; queues/workers; health & auth; action link signing; basic Admin shell.
+
+**M1 – Intake & Pending Board (1 week)**
+
+- Apps Script endpoint + Brevo send; Asana pending board bootstrap & webhook; Step 1 + PM notify. ([Google for Developers][10], [docs.bullmq.io][11], [ai-sdk.dev][12], [developers.asana.com][4])
+
+**M2 – Brand Origin loop (1.5–2 weeks)**
+
+- Doc generator + snapshots; review/send; inbound parse + intent; regeneration loop; Asana comments. ([developers.brevo.com][3])
+
+**M3 – Budget/Timeline + variants (1.5 weeks)**
+
+- Confirm flow; main + 3 variants; loop until accepted.
+
+**M4 – Project initialization (1.5 weeks)**
+
+- Create Asana real project, sections & tasks; guidance comments; completion email.
+
+**M5 – Observability & polish (1 week)**
+
+- Logs/metrics, admin ops (replay, re-bootstrap), error dashboards.
+
+---
+
+### Notes & constraints surfaced during design
+
+- **Drive non-purgeable revisions for Google Docs aren’t supported via `keepForever`** (binary only). We meet the “non-purgeable” requirement by **DB snapshots** + optional duplicated Docs at milestones. ([Google for Developers][15])
+- **Asana @mentions** via `html_text` with `data-asana-gid` let us tag PM/Finance reliably from API comments. ([developers.asana.com][14])
+- **Webhooks security** must honor provider-specific guidance (Asana secrets/signatures; Brevo auth/allowlists). ([developers.asana.com][9], [developers.brevo.com][19])
+
+[1]: https://www.anthropic.com/research/building-effective-agents "Building Effective AI Agents"
+[2]: https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data "Generating Structured Data"
+[3]: https://developers.brevo.com/docs/inbound-parse-webhooks "Inbound parsing webhooks"
+[4]: https://developers.asana.com/reference/createwebhook "Establish a webhook"
+[5]: https://ai-sdk.dev/docs/introduction "AI SDK by Vercel"
+[6]: https://docs.bullmq.io/guide/jobs/stalled "Stalled"
+[7]: https://docs.bullmq.io/guide/job-schedulers "Job Schedulers"
+[8]: https://developers.asana.com/docs/rate-limits "Rate limits - Asana Docs"
+[9]: https://developers.asana.com/docs/webhooks-guide "Webhooks"
+[10]: https://developers.google.com/apps-script/guides/web "Web Apps | Apps Script"
+[11]: https://docs.bullmq.io/guide/retrying-failing-jobs "Retrying failing jobs"
+[12]: https://ai-sdk.dev/providers/ai-sdk-providers "Vercel AI SDK providers"
+[13]: https://developers.brevo.com/docs/send-a-transactional-email "Send a transactional email"
+[14]: https://developers.asana.com/reference/createstoryfortask "Create a story on a task"
+[15]: https://developers.google.com/workspace/drive/api/reference/rest/v3/revisions "REST Resource: revisions | Google Drive - Google for Developers"
+[16]: https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling "AI SDK Core: Tool Calling"
+[17]: https://docs.bullmq.io/guide/queuescheduler "QueueScheduler"
+[18]: https://api.docs.bullmq.io/interfaces/v1.JobsOptions.html "Interface JobsOptions"
+[19]: https://developers.brevo.com/docs/username-and-password-authentication "Secured webhook calls"
