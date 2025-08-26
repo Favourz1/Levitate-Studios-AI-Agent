@@ -1,0 +1,91 @@
+// Enums as constants for type safety and runtime validation
+const ProjectPhase = {
+  QUESTIONNAIRE: "QUESTIONNAIRE",
+  BRAND_ORIGIN: "BRAND_ORIGIN",
+  BUDGET_TIMELINE: "BUDGET_TIMELINE",
+  FINALIZED: "FINALIZED",
+  REJECTED: "REJECTED",
+};
+
+const DocumentType = {
+  BRAND_ORIGIN: "BRAND_ORIGIN",
+  BUDGET_TIMELINE: "BUDGET_TIMELINE",
+  BUDGET_TIMELINE_VARIANT: "BUDGET_TIMELINE_VARIANT",
+};
+
+const DocumentStatus = {
+  DRAFT: "DRAFT",
+  PM_REVIEW: "PM_REVIEW",
+  SENT_TO_CLIENT: "SENT_TO_CLIENT",
+  CLIENT_FEEDBACK: "CLIENT_FEEDBACK",
+  ACCEPTED: "ACCEPTED",
+  REJECTED: "REJECTED",
+};
+
+const EmailDirection = {
+  INBOUND: "INBOUND",
+  OUTBOUND: "OUTBOUND",
+};
+
+const EmailIntent = {
+  NONE: "NONE",
+  DOC_FEEDBACK: "DOC_FEEDBACK",
+  ACCEPT: "ACCEPT",
+  REJECT: "REJECT",
+  OFFTOPIC: "OFFTOPIC",
+  OTHER: "OTHER",
+};
+
+const Actor = {
+  SYSTEM: "SYSTEM",
+  USER: "USER",
+  LLM: "LLM",
+};
+
+const CreatedBy = {
+  AGENT: "AGENT",
+  PM: "PM",
+  FINANCE: "FINANCE",
+  CLIENT: "CLIENT",
+};
+
+const JobStatus = {
+  QUEUED: "QUEUED",
+  RUNNING: "RUNNING",
+  SUCCEEDED: "SUCCEEDED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+};
+
+const WebhookProvider = {
+  ASANA: "ASANA",
+  BREVO: "BREVO",
+  APPS_SCRIPT: "APPS_SCRIPT",
+};
+
+const TeamRole = {
+  ADMIN: "ADMIN",
+  MANAGER: "MANAGER",
+  WEB_DESIGNER: "WEB_DESIGNER",
+  GRAPHICS_DESIGNER: "GRAPHICS_DESIGNER",
+  CREATIVE_DIRECTOR: "CREATIVE_DIRECTOR",
+  UI_DESIGNER: "UI_DESIGNER",
+  PROJECT_MANAGER: "PROJECT_MANAGER",
+  COPY_WRITER: "COPY_WRITER",
+  DIGITAL_MARKETER: "DIGITAL_MARKETER",
+  MOTION_GRAPHICS_DESIGNER: "MOTION_GRAPHICS_DESIGNER",
+  FINANCE_MANAGER: "FINANCE_MANAGER",
+};
+
+module.exports = {
+  ProjectPhase,
+  DocumentType,
+  DocumentStatus,
+  EmailDirection,
+  EmailIntent,
+  Actor,
+  CreatedBy,
+  JobStatus,
+  WebhookProvider,
+  TeamRole,
+};

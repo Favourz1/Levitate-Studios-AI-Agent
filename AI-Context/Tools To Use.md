@@ -1,6 +1,6 @@
-Backend: Node.js + TypeScript
+Backend: Node.js + Javascript
 
-DB: PostgreSQL (Railway)
+DB: PostgreSQL and prisma (Railway)
 
 Background jobs: BullMQ + Redis
 LLM gateway: Vercel AI SDK . [AI SDK](https://ai-sdk.dev/)

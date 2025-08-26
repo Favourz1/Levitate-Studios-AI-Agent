@@ -1,0 +1,232 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id            Int      @id @default(autoincrement())
+  name          String
+  primaryEmail  String   @map("primary_email")
+  status        String   @default("ACTIVE")
+  context       String?  @db.Text // Additional context for AI
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  projects      Project[]
+  emailThreads  EmailThread[] @relation("ClientEmailThreads")
+
+  @@map("clients")
+}
+
+model Project {
+  id              Int      @id @default(autoincrement())
+  clientId        Int      @map("client_id")
+  name            String
+  phase           String   // QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED
+  asanaProjectGid String?  @map("asana_project_gid")
+  context         String? @db.Text  // Additional project context
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  client          Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  documents       Document[]
+  emailThreads    EmailThread[]
+  asanaLinks      AsanaLink[]
+  auditLogs       AuditLog[]
+  projectPhaseLogs ProjectPhaseLog[]
+
+  @@map("projects")
+}
+
+model ProjectPhaseLog {
+  id        Int      @id @default(autoincrement())
+  projectId Int      @map("project_id")
+  fromPhase String?  @map("from_phase")
+  toPhase   String   @map("to_phase")
+  reason    String?
+  actor     String   // SYSTEM, USER, LLM
+  at        DateTime @default(now())
+
+  // Relations
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_phase_log")
+}
+
+model Document {
+  id                Int      @id @default(autoincrement())
+  projectId         Int      @map("project_id")
+  type              String   // BRAND_ORIGIN, BUDGET_TIMELINE, BUDGET_TIMELINE_VARIANT
+  status            String   // DRAFT, PM_REVIEW, SENT_TO_CLIENT, CLIENT_FEEDBACK, ACCEPTED, REJECTED
+  driveFileId       String?  @map("drive_file_id")
+  currentRevisionId Int?     @map("current_revision_id")
+  isVariant         Boolean  @default(false) @map("is_variant")
+  variantIndex      Int?     @map("variant_index")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revisions         DocumentRevision[]
+  currentRevision   DocumentRevision? @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
+
+  @@map("documents")
+}
+
+model DocumentRevision {
+  id               Int      @id @default(autoincrement())
+  documentId       Int      @map("document_id")
+  driveRevisionId  String?  @map("drive_revision_id")
+  snapshotText     String   @map("snapshot_text") @db.Text
+  snapshotMd       Json?    @map("snapshot_md") @db.JsonB
+  createdBy        String   @map("created_by") // AGENT, PM, FINANCE, CLIENT
+  summary          String?  // AI-generated summary of changes
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  document         Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  currentDocuments Document[] @relation("CurrentRevision")
+
+  @@map("document_revisions")
+}
+
+model EmailThread {
+  id               Int      @id @default(autoincrement())
+  projectId        Int      @map("project_id")
+  clientId         Int      @map("client_id")
+  replyToAddress   String   @map("reply_to_address")
+  providerThreadId String?  @map("provider_thread_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client           Client   @relation("ClientEmailThreads", fields: [clientId], references: [id], onDelete: Cascade)
+  emails           Email[]
+
+  @@unique([replyToAddress])
+  @@map("email_threads")
+}
+
+model Email {
+  id                Int      @id @default(autoincrement())
+  threadId          Int      @map("thread_id")
+  direction         String   // INBOUND, OUTBOUND
+  fromAddr          String   @map("from_addr")
+  toAddr            String   @map("to_addr")
+  subject           String
+  rawHeaders        Json     @map("raw_headers") @db.JsonB
+  textBody          String?  @map("text_body") @db.Text
+  htmlBody          String?  @map("html_body") @db.Text
+  attachmentsMeta   Json?    @map("attachments_meta") @db.JsonB
+  brevoEventId      String?  @map("brevo_event_id")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  intent            String?  // NONE, DOC_FEEDBACK, ACCEPT, REJECT, OFFTOPIC, OTHER
+  intentConfidence  Decimal? @map("intent_confidence") @db.Decimal(5, 4)
+  llmTraceId        String?  @map("llm_trace_id")
+  processed         Boolean  @default(false)
+
+  // Relations
+  thread            EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([toAddr])
+  @@index([receivedAt(sort: Desc)])
+  @@map("emails")
+}
+
+model AsanaLink {
+  id                 Int      @id @default(autoincrement())
+  projectId          Int      @map("project_id")
+  pendingBoardGid    String?  @map("pending_board_gid")
+  finalizedBoardGid  String?  @map("finalized_board_gid")
+  sections           Json     @map("sections") @db.JsonB // name → gid mapping
+  pmGid              String?  @map("pm_gid")
+  financeGid         String?  @map("finance_gid")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks              AsanaTask[]
+
+  @@map("asana_links")
+}
+
+model AsanaTask {
+  id           Int      @id @default(autoincrement())
+  projectId    Int      @map("project_id")
+  asanaLinkId  Int      @map("asana_link_id")
+  taskGid      String   @map("task_gid")
+  sectionName  String   @map("section_name")
+  assigneeGid  String?  @map("assignee_gid")
+  dueOn        DateTime? @map("due_on")
+  meta         Json     @map("meta") @db.JsonB
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  asanaLink    AsanaLink @relation(fields: [asanaLinkId], references: [id], onDelete: Cascade)
+
+  @@map("asana_tasks")
+}
+
+model TeamMember {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  asanaUserGid String   @map("asana_user_gid")
+  roles        Json     @map("roles") @db.JsonB // [{role: string, isLead: boolean}]
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("team_members")
+}
+
+model JobRun {
+  id          Int      @id @default(autoincrement())
+  name        String
+  args        Json     @map("args") @db.JsonB
+  status      String   // QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED
+  dedupeKey   String?  @map("dedupe_key")
+  attempts    Int      @default(0)
+  lastError   String?  @map("last_error") @db.Text
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([dedupeKey])
+  @@map("job_runs")
+}
+
+model WebhookSubscription {
+  id           Int      @id @default(autoincrement())
+  provider     String   // ASANA, BREVO, APPS_SCRIPT
+  resourceId   String   @map("resource_id")
+  secret       String
+  callbackUrl  String   @map("callback_url")
+  lastEventAt  DateTime? @map("last_event_at")
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("webhook_subscriptions")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  projectId Int?     @map("project_id")
+  actor     String   // WHO performed the action
+  action    String   // WHAT action was performed
+  details   Json     @map("details") @db.JsonB // Additional context
+  at        DateTime @default(now())
+
+  // Relations
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("audit_log")
+}
