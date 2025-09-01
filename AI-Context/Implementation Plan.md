@@ -147,8 +147,8 @@ C) **UI native form** → API same as (A).
 
 - On email intent=ACCEPT **or** manual accept:
 
-  - Send **confirmation email** to PM & Finance with a single “Confirm & Create Budget/Timeline” CTA (either can click).
-  - Clicking CTA enqueues `DOC_BUDGET_TIMELINE_GENERATE` with dedupe key; set project.phase=BRAND_ORIGIN→BUDGET_TIMELINE; move Asana task to **Budget/Timeline Phase**; comment tagging PM & Finance with review/send CTAs.
+  - Send **confirmation email** to PM & Finance with a single “Confirm & Create Budget/Timeline” CTA (either can click). - Confirmation email only sent if detected intent=ACCEPT, if manual accept don't send email just proceed to next phase.
+  - Clicking CTA or manual accept enqueues `DOC_BUDGET_TIMELINE_GENERATE` with dedupe key; set project.phase=BRAND_ORIGIN→BUDGET_TIMELINE; move Asana task to **Budget/Timeline Phase**; comment tagging PM & Finance with review/send CTAs.
   - Generate **3 one-time variants** alongside the main Budget/Timeline doc (flag `is_variant=true`, `variant_index=1..3`); do **not** regenerate variants on later edits (only the main document).
 
 ### Step 6 — Budget/Timeline feedback loop
@@ -192,12 +192,14 @@ C) **UI native form** → API same as (A).
 **Providers & cost-aware model routing**
 
 - **Classification / intent detection / extract fields** → small model via `generateObject` (schema) - the SDK supports tool-calling + structured outputs. ([ai-sdk.dev][2])
-- **Document drafting** (Brand Origin, Budget/Timeline) → balanced quality/cost model; allow multi-step tool loops (web search or repo lookups if needed, rules and example documents would be given in context) via AI SDK **tool calling**. ([ai-sdk.dev][16])
+- **Document drafting** (Brand Origin, Budget/Timeline) → balanced quality/cost model; allow multi-step tool loops (web search, projec/client history reading from db, previous doc create favoring accepted ones or repo lookups etc. if needed, rules and example documents would be given in context) via AI SDK **tool calling**. ([ai-sdk.dev][16])
 
-**Tools exposed to the agent**
+**Tools exposed to the agent, feel free to add if no one caters for your needs yet - but update the list here.**
 
-- `readProjectContext(projectId)`, `readSnapshots(documentId)`
-- `writeDoc(type, content)`, `createVariant(...)`
+- `readProjectContext(projectId)`,
+- `readSnapshots(documentId)`
+- `writeDoc(type, content)`,
+- `createVariant(...)`
 - `postAsanaComment(taskGid, html_text)` (supports `@mentions` via `html_text` with user gid). ([developers.asana.com][14])
 - `sendEmail(templateId, to, params)`
 - `advanceState(projectId, transition)` (guarded)
@@ -327,7 +329,7 @@ C) **UI native form** → API same as (A).
 
 ## 19) Cost controls
 
-- Prefer **small models** for classification; reserve larger models only for longform docs; enforce token caps. ([ai-sdk.dev][2])
+- Prefer **small models** for classification; reserve larger models only for longform docs; enforce token caps but don't limit quality of LLM response. ([ai-sdk.dev][2])
 - Batch Asana writes when possible; respect rate limits; collapse duplicate comments. ([developers.asana.com][8])
 - Snapshot **text only** (compressed) rather than storing PDFs for every revision.
 
