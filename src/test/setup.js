@@ -1,5 +1,6 @@
 const { appConfig } = require("@/config");
 const { createPrismaClient } = require("@/database");
+import { beforeAll, afterAll, expect } from "@jest/globals";
 
 // Global test setup
 beforeAll(async () => {

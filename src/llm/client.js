@@ -47,6 +47,13 @@ class LLMClient {
   getProvider(provider) {
     switch (provider) {
       case "openai":
+        if (!appConfig.llm.openaiApiKey) {
+          throw new LLMError(
+            "openai",
+            "initialization",
+            new Error("OpenAI API key not configured")
+          );
+        }
         return openai(appConfig.llm.openaiApiKey);
       case "anthropic":
         if (!appConfig.llm.anthropicApiKey) {
