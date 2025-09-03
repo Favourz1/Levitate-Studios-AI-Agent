@@ -26,6 +26,7 @@ const envSchema = Joi.object({
   GOOGLE_PRIVATE_KEY: Joi.string().required(),
   GOOGLE_CLIENT_EMAIL: Joi.string().email().required(),
   GOOGLE_PROJECT_ID: Joi.string().required(),
+  GOOGLE_APPS_SCRIPT_SECRET: Joi.string().required(),
 
   // Brevo
   BREVO_API_KEY: Joi.string().required(),
@@ -83,6 +84,7 @@ const appConfig = {
     privateKey: envVars.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
     clientEmail: envVars.GOOGLE_CLIENT_EMAIL,
     projectId: envVars.GOOGLE_PROJECT_ID,
+    appsScriptSecret: envVars.GOOGLE_APPS_SCRIPT_SECRET,
   },
   brevo: {
     apiKey: envVars.BREVO_API_KEY,

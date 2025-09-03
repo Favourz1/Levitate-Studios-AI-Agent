@@ -52,7 +52,27 @@ app.use(securityHeaders);
 // CORS middleware
 // app.use(corsMiddleware);
 
-// Request parsing middleware
+// Special middleware for webhook routes - preserve raw body for ALL apps-script endpoints
+app.use(
+  "/api/webhooks/",
+  express.raw({
+    type: "application/json",
+    limit: "50mb",
+  }),
+  (req, res, next) => {
+    // Store the raw body buffer in a separate field for signature validation
+    req.rawBodyBuffer = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(req.body || "", "utf8");
+
+    // Also store original raw body string for debugging
+    req.rawBodyString = req.rawBodyBuffer.toString("utf8");
+
+    next();
+  }
+);
+
+// Standard JSON parsing middleware for other routes
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
