@@ -1,9 +1,9 @@
-const { asanaIntegration } = require("@/integrations/asana");
+const { AsanaIntegration } = require("@/integrations/asana");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { googleIntegration } = require("@/integrations/google");
 
 module.exports = {
-  asanaIntegration,
+  AsanaIntegration,
   brevoIntegration,
   googleIntegration,
 };

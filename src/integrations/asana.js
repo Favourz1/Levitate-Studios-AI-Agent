@@ -1,4 +1,4 @@
-const Asana = require("asana");
+const asana = require("asana");
 const { appConfig } = require("@/config");
 const { AsanaError } = require("@/utils/errors");
 const { createLogger, logIntegrationCall } = require("@/utils/logger");
@@ -9,9 +9,36 @@ const logger = createLogger("integration:asana");
 // Asana API client
 class AsanaIntegration {
   constructor() {
-    this.client = Asana.Client.create().useAccessToken(
-      appConfig.asana.accessToken
-    );
+    // Validate that asana module is available
+    if (!asana || !asana.Client) {
+      throw new Error(
+        "Asana client library is not properly installed or imported"
+      );
+    }
+
+    // Validate that access token is configured
+    if (!appConfig.asana?.accessToken) {
+      throw new Error("Asana access token is not configured");
+    }
+
+    try {
+      this.client = asana.Client.create().useAccessToken(
+        appConfig.asana.accessToken
+      );
+
+      // Validate the client was created successfully
+      if (!this.client) {
+        throw new Error("Failed to create Asana client");
+      }
+
+      logger.info("Asana client initialized successfully");
+    } catch (error) {
+      logger.error(
+        { error: error.message },
+        "Failed to initialize Asana client"
+      );
+      throw new AsanaError("client_initialization", error);
+    }
   }
 
   // Handle rate limiting automatically
@@ -612,7 +639,5 @@ class AsanaIntegration {
   }
 }
 
-// Create and export singleton instance
-const asanaIntegration = new AsanaIntegration();
-
-module.exports = { asanaIntegration };
+// Export the class instead of singleton instance to avoid initialization issues
+module.exports = { AsanaIntegration };

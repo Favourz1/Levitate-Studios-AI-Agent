@@ -3,7 +3,7 @@ const { z } = require("zod");
 const { getPrismaClient } = require("@/database");
 const { googleIntegration } = require("@/integrations/google");
 const { brevoIntegration } = require("@/integrations/brevo");
-const { asanaIntegration } = require("@/integrations/asana");
+const { AsanaIntegration } = require("@/integrations/asana");
 const { QueueService } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ValidationError } = require("@/utils/errors");
@@ -366,11 +366,8 @@ const postAsanaCommentTool = tool({
         }
       }
 
-      const comment = await asanaIntegration.addTaskComment(
-        taskGid,
-        text,
-        htmlText
-      );
+      const asanaClient = new AsanaIntegration();
+      const comment = await asanaClient.addTaskComment(taskGid, text, htmlText);
 
       logger.info(
         {
