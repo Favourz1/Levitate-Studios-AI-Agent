@@ -43,6 +43,7 @@ model Project {
   asanaLinks      AsanaLink[]
   auditLogs       AuditLog[]
   projectPhaseLogs ProjectPhaseLog[]
+  questionnaireResponses QuestionnaireResponse[]
 
   @@map("projects")
 }
@@ -215,6 +216,30 @@ model WebhookSubscription {
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("webhook_subscriptions")
+}
+
+model QuestionnaireResponse {
+  id               Int      @id @default(autoincrement())
+  projectId        Int      @map("project_id")
+  formId           String   @map("form_id")          // Google Form ID
+  responseId       String   @map("response_id")      // Google Form response ID  
+  responses        Json     @map("responses") @db.JsonB // The actual form answers
+  respondentEmail  String?  @map("respondent_email") // Email of person who filled form
+  submittedAt      DateTime @default(now()) @map("submitted_at")
+  processedAt      DateTime? @map("processed_at")    // When we processed this response
+  processingStatus String   @default("PENDING") @map("processing_status") // PENDING, PROCESSED, FAILED
+  errorMessage     String?  @map("error_message") @db.Text // If processing failed
+  retryCount       Int      @default(0) @map("retry_count") // For retry logic
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, responseId]) // Prevent duplicate form responses
+  @@index([projectId])
+  @@index([processingStatus])
+  @@map("questionnaire_responses")
 }
 
 model AuditLog {
