@@ -110,3 +110,4 @@ Note:
 14. ASANA HIREACHY:
     Project → Board/List (view) → Columns/Sections → Tasks → Subtasks.
 15. In the broader implementation we want to break huge LLM calls to smaller sections and chain results with proper evaluation, retry and guardrails. With also tools that run programmatically and return expected response/error format (https://www.anthropic.com/engineering/building-effective-agents)
+16. See here to get insights on structuring system prompts. https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools

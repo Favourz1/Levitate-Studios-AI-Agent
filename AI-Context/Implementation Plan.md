@@ -50,11 +50,12 @@ For enums listed here don't add in db level, let it be in backend level and vali
 - **clients**: id, name, primary_email, status, created_at
 - **projects**: id, client_id, name, phase(enum: QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED), asana_project_gid (nullable until Step 7), created_at, updated_at
 - **project_phase_log**: id, project_id, from_phase, to_phase, reason, actor(enum: SYSTEM|USER|LLM), at
+- **questionnaire_responses**: id, project_id, form_id, response_id, responses(JSONB), respondent_email, submitted_at, processed_at, processing_status(enum: PENDING|PROCESSED|FAILED), error_message(TEXT), retry_count, created_at, updated_at
 - **documents**: id, project_id, type(enum: BRAND_ORIGIN|BUDGET_TIMELINE|BUDGET_TIMELINE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), is_variant(bool), variant_index(int|null), created_at, updated_at
 - **document_revisions**: id, document_id, drive_revision_id(nullable), snapshot_text(TEXT, gzip/base64), snapshot_md(JSONB optional), created_by(enum: AGENT|PM|FINANCE|CLIENT), created_at
 - **email_threads**: id, project_id, client_id, reply_to_address, provider_thread_id (Brevo/Message-Id), created_at
 - **emails**: id, thread_id, direction(enum: INBOUND|OUTBOUND), from_addr, to_addr, subject, raw_headers(JSONB), text_body(TEXT), html_body(TEXT), attachments_meta(JSONB), brevo_event_id, received_at, intent(enum: NONE|DOC_FEEDBACK|ACCEPT|REJECT|OFFTOPIC|OTHER), intent_confidence(NUMERIC), llm_trace_id, processed(bool)
-- **asana_links**: id, project_id, pending_board_gid (for “Pending Projects”), finalized_board_gid (for real project), sections(JSONB: name→gid), pm_gid, finance_gid, created_at
+- **asana_links**: id, project_id, pending_board_gid (for "Pending Projects"), finalized_board_gid (for real project), sections(JSONB: name→gid), pm_gid, finance_gid, created_at
 - **asana_tasks**: id, project_id, task_gid, section_name, assignee_gid, due_on, meta(JSONB), created_at
 - **team_members**: id, name, email, asana_user_gid, roles(JSONB: \[{role, is_lead}])
 - **job_runs**: id, name, args(JSONB), status(enum: QUEUED|RUNNING|SUCCEEDED|FAILED|CANCELLED), dedupe_key, attempts, last_error(TEXT), started_at, finished_at
@@ -63,7 +64,7 @@ For enums listed here don't add in db level, let it be in backend level and vali
 
 **Indexes**
 
-- (emails.to_addr), (emails.received_at DESC); (document_revisions.document_id, created_at DESC); (job_runs.dedupe_key UNIQUE NULLS DISTINCT); (projects.client_id, phase)
+- (emails.to_addr), (emails.received_at DESC); (document_revisions.document_id, created_at DESC); (job_runs.dedupe_key UNIQUE NULLS DISTINCT); (projects.client_id, phase); (questionnaire_responses.project_id), (questionnaire_responses.processing_status), (questionnaire_responses.submitted_at DESC); UNIQUE(questionnaire_responses.form_id, response_id)
 
 ---
 
@@ -101,25 +102,54 @@ For enums listed here don't add in db level, let it be in backend level and vali
 ### Step 1 — Questionnaire intake
 
 **Paths:**
-A) **Google Form** → Apps Script → our `/webhooks/apps-script/forms` → create **client**, **project** (phase=QUESTIONNAIRE), **email_thread** (reply-to reserved), add **Pending Projects** Asana task in “Filled Questionnaire”. ([Google for Developers][10], [docs.bullmq.io][11])
+A) **Google Form** → Apps Script → our `/webhooks/apps-script/forms` → create **client** (if not exists), **project** (phase=QUESTIONNAIRE), validate & store **questionnaire_response**, **email_thread** (reply-to reserved), add **Pending Projects** Asana task in "Filled Questionnaire". ([Google for Developers][10], [docs.bullmq.io][11])
 B) **Uploaded filled doc** → parse on FE → prefill UI form → submit to API same as (A).
 C) **UI native form** → API same as (A).
 
-**Asana “Pending Projects”**
+**Questionnaire Processing:**
+
+1. **Webhook receives form data**: Parse Google Apps Script payload containing form_id, response_id, responses (field→answer mapping), respondent_email, timestamp
+2. **Validation & deduplication**: Check for existing form_id+response_id combination to prevent duplicates
+3. **Data extraction**: Extract client info (name, email) and project info (name, description) from questionnaire responses. Client email is ususaly the respondent email or if not present check for email key/value pair in reponses field.
+4. **Database transaction**:
+   - Create/update **client** record (match by email, update context if existing)
+   - Create **project** record with phase=QUESTIONNAIRE
+   - Insert **questionnaire_response** with status=PENDING
+   - Create **email_thread** with unique reply-to address
+   - Mark questionnaire_response status=PROCESSED
+
+**Asana "Pending Projects"**
 
 - On first run, create project if missing, add sections: _Filled Questionnaire_, _Brand Origin Doc Phase_, _Budget/Timeline Phase_, _Finalized_, _Rejected_; persist gids; register webhook(s). ([ai-sdk.dev][12], [developers.asana.com][4])
 - Add task per intake; assign PM; store mapping in DB.
 
 **Notify PM**
 
-- Transactional email via Brevo (template with CTA “Review Brand Origin”). ([developers.brevo.com][13])
+- Transactional email via Brevo (template with CTA "Review Brand Origin"). ([developers.brevo.com][13])
+
+**Error Handling & Edge Cases:**
+
+- **Duplicate submissions**: UNIQUE constraint on (form_id, response_id) prevents duplicates; return 200 OK for duplicates
+- **Invalid form data**: Set processing_status=FAILED with error_message; retry up to 3 times
+- **Client email mismatch**: If email differs from existing client, create new client or prompt manual merge in admin UI
+- **Partial form data**: Store response even if some fields missing; flag for PM review
+- **Apps Script timeout**: Use async processing with status tracking; Apps Script gets immediate 200 OK
 
 ### Step 2 — Brand Origin document generation
 
 - Enqueue `DOC_BRAND_ORIGIN_GENERATE` (BullMQ) with **dedupe key** `project:<id>:brand_origin:generate`.
-- Worker composes prompt/context from normalized text (questionnaire, client profile), calls model. Use structured plan → compose → self-check loop; write Drive file; create `document` & first `document_revision` (snapshot text too).
+- **Worker context assembly**: Query `questionnaire_responses` for project + `client.context` + `project.context` + brand origin templates/rules. Parse questionnaire JSON into structured prompt context.
+- **LLM workflow**: Use structured plan → compose → self-check loop with questionnaire data as primary input; write Drive file; create `document` & first `document_revision` (snapshot text too).
 - Move Asana task to **Brand Origin Doc Phase** (update section). Add story comment, @mention PM with links to Review / Send. ([developers.asana.com][14])
 - Email PM with buttons (Review / Send to Client).
+
+**Context Sources for LLM (Priority Order):**
+
+1. **questionnaire_responses.responses** (JSON) - Primary client requirements
+2. **client.context** - Additional client background/preferences
+3. **project.context** - Project-specific notes
+4. **Brand origin templates** - Standard document structure
+5. **Previous accepted brand origins** - For style consistency
 
 **Versioning**
 
@@ -196,13 +226,14 @@ C) **UI native form** → API same as (A).
 
 **Tools exposed to the agent, feel free to add if no one caters for your needs yet - but update the list here.**
 
-- `readProjectContext(projectId)`,
-- `readSnapshots(documentId)`
-- `writeDoc(type, content)`,
-- `createVariant(...)`
+- `readProjectContext(projectId)` - Gets client.context + project.context + project metadata
+- `readQuestionnaireResponses(projectId)` - **NEW** - Gets all questionnaire responses for project with structured parsing
+- `readSnapshots(documentId)` - Gets document revision history
+- `writeDoc(type, content)` - Creates/updates documents in Google Drive + DB
+- `createVariant(...)` - Creates document variants (Budget/Timeline only)
 - `postAsanaComment(taskGid, html_text)` (supports `@mentions` via `html_text` with user gid). ([developers.asana.com][14])
-- `sendEmail(templateId, to, params)`
-- `advanceState(projectId, transition)` (guarded)
+- `sendEmail(templateId, to, params)` - Sends transactional emails via Brevo
+- `advanceState(projectId, transition)` - Manages project phase transitions (guarded)
 
 **Execution pattern**
 
@@ -286,7 +317,88 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 15) Security, auth, and integrity
+## 15) Questionnaire & Data Flow Edge Cases
+
+**Questionnaire Submission Edge Cases:**
+
+1. **Multiple submissions from same respondent**:
+
+   - **Detection**: Track by form_id + response_id (Google Forms unique identifiers)
+   - **Action**: Return 200 OK for duplicates; log for audit but don't reprocess
+   - **Admin override**: Allow manual reprocessing via admin UI if needed
+
+2. **Malformed questionnaire data**:
+
+   - **Validation**: Check required fields (client name, email, project description)
+   - **Partial data**: Store what's available, set processing_status=FAILED with specific error
+   - **Retry logic**: Up to 3 automatic retries with exponential backoff
+   - **PM notification**: Email PM for manual review if all retries fail
+
+3. **Client email conflicts**:
+
+   - **Existing client, different name**: Update client.context with new info; flag for PM review
+   - **Same email, different projects**: Create new project under existing client
+   - **Typo in email**: Store as-is; PM can merge clients via admin UI later
+
+4. **Large questionnaire responses**:
+
+   - **Size limit**: Max 1MB per response JSON (PostgreSQL JSONB limit)
+   - **Truncation**: If exceeds limit, truncate with warning in error_message
+   - **File attachments**: Store metadata only; actual files handled separately
+
+5. **Apps Script failures**:
+   - **Timeout**: Apps Script gets immediate 200 OK; actual processing is async
+   - **Google Forms API changes**: Validate expected field structure; fail gracefully
+   - **Rate limiting**: Implement exponential backoff for Google API calls
+
+**LLM Context Assembly Edge Cases:**
+
+6. **Missing questionnaire data**:
+
+   DOn't process if questionaire data missing
+
+   - **Corrupted JSON**: Attempt parsing with error recovery; log parsing errors
+
+7. **Questionnaire format changes**:
+
+   - **New fields**: Ignore unknown fields; focus on core requirements
+   - **Removed fields**: Handle missing expected fields gracefully
+   - **Field name changes**: Maintain backward compatibility mapping for 6 months
+
+8. **Context size limits**:
+   - **Token overflow**: Prioritize most recent questionnaire + client context
+   - **Multiple questionnaires**: If client submits multiple forms, use latest by submitted_at
+   - **Chunking strategy**: Split large context into sections (client info, project details, style preferences)
+
+**Database Consistency Edge Cases:**
+
+9. **Transaction failures**:
+
+   - **Partial writes**: Use database transactions; rollback if any step fails
+   - **Foreign key violations**: Handle gracefully; create referenced records if missing
+   - **Unique constraint violations**: Return appropriate error; don't crash
+
+10. **Concurrent processing**:
+    - **Duplicate project creation**: Use upsert patterns; check for existing projects by client email + project name
+    - **Race conditions**: Use proper database locks for critical sections
+    - **Job deduplication**: BullMQ dedupe keys prevent duplicate document generation
+
+**Document Generation Edge Cases:**
+
+11. **LLM failures during brand origin creation**:
+
+    - **API errors**: Retry with exponential backoff; escalate to PM after 3 failures
+    - **Invalid output**: Validate LLM response structure; regenerate if malformed
+    - **Context too large**: Summarize questionnaire responses before sending to LLM
+
+12. **Google Drive integration failures**:
+    - **Quota exceeded**: Queue for retry when quota resets; notify admin
+    - **Permission errors**: Ensure service account has proper folder access
+    - **File corruption**: Keep database snapshots as source of truth; recreate Drive file from snapshot
+
+---
+
+## 16) Security, auth, and integrity
 
 - Secrets in Railway env vars; rotate regularly.
 - **Inbound webhooks**
@@ -368,6 +480,7 @@ C) **UI native form** → API same as (A).
 - **Drive non-purgeable revisions for Google Docs aren’t supported via `keepForever`** (binary only). We meet the “non-purgeable” requirement by **DB snapshots** + optional duplicated Docs at milestones. ([Google for Developers][15])
 - **Asana @mentions** via `html_text` with `data-asana-gid` let us tag PM/Finance reliably from API comments. ([developers.asana.com][14])
 - **Webhooks security** must honor provider-specific guidance (Asana secrets/signatures; Brevo auth/allowlists). ([developers.asana.com][9], [developers.brevo.com][19])
+- Check here on how to structure system prompts: (https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools)[https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools]
 
 [1]: https://www.anthropic.com/research/building-effective-agents "Building Effective AI Agents"
 [2]: https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data "Generating Structured Data"
