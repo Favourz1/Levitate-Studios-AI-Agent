@@ -453,6 +453,7 @@ const extractProjectInfo = (parsedBody) => {
 
   // Look for project specific info in responses
   const projectNameKeys = [
+    "What do you want this project to be called?",
     "Project name",
     "Project title",
     "What is this project about?",
@@ -669,6 +670,7 @@ const processFormSubmission = async (parsedBody, correlationId) => {
       "Created new project"
     );
 
+    // TODO: Set formTitle field in questionnaire_response db table and use here.
     // Step 5: Store questionnaire response
     const questionnaireResponse = await tx.questionnaireResponse.create({
       data: {
@@ -1099,6 +1101,7 @@ router.post(
         responseId: parsedBody.responseId,
       });
 
+      console.log("parsedBody", parsedBody);
       // Step 5: Continue with form processing
 
       // Step 6: Process the form submission (database operations)
@@ -1117,6 +1120,10 @@ router.post(
           projectId: processedData.project.id,
         });
       } catch (processingError) {
+        console.log(
+          "processingError from processFormSubmission",
+          processingError
+        );
         logger.error({
           message: "Form processing failed",
           correlationId,
@@ -1165,6 +1172,7 @@ router.post(
         timestamp: new Date().toISOString(),
         processingTime: Date.now() - startTime,
       });
+      return;
 
       // Step 8: Handle Asana task creation and notifications asynchronously
       // This runs in the background and doesn't block the response
