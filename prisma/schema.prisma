@@ -255,3 +255,14 @@ model AuditLog {
 
   @@map("audit_log")
 }
+
+model GlobalConfig {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       Json     @map("value") @db.JsonB
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("global_configs")
+}

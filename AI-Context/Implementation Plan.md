@@ -60,11 +60,25 @@ For enums listed here don't add in db level, let it be in backend level and vali
 - **team_members**: id, name, email, asana_user_gid, roles(JSONB: \[{role, is_lead}])
 - **job_runs**: id, name, args(JSONB), status(enum: QUEUED|RUNNING|SUCCEEDED|FAILED|CANCELLED), dedupe_key, attempts, last_error(TEXT), started_at, finished_at
 - **webhook_subscriptions**: id, provider(enum: ASANA|BREVO|APPS_SCRIPT), resource_id, secret, callback_url, last_event_at, status
+- **global_configs**: id, key, value(JSONB), description, updated_at, created_at
 - **audit_log**: id, project_id, actor, action, details(JSONB), at
 
 **Indexes**
 
-- (emails.to_addr), (emails.received_at DESC); (document_revisions.document_id, created_at DESC); (job_runs.dedupe_key UNIQUE NULLS DISTINCT); (projects.client_id, phase); (questionnaire_responses.project_id), (questionnaire_responses.processing_status), (questionnaire_responses.submitted_at DESC); UNIQUE(questionnaire_responses.form_id, response_id)
+- (emails.to_addr), (emails.received_at DESC); (document_revisions.document_id, created_at DESC); (job_runs.dedupe_key UNIQUE NULLS DISTINCT); (projects.client_id, phase); (questionnaire_responses.project_id), (questionnaire_responses.processing_status), (questionnaire_responses.submitted_at DESC); UNIQUE(questionnaire_responses.form_id, response_id); UNIQUE(global_configs.key)
+
+**Global Configuration Storage**
+
+The `global_configs` table stores system-wide configuration that needs to persist across restarts:
+
+- **Key**: `asana_pending_projects` - Stores the persistent "Pending Projects" board configuration
+
+**Configuration Access Patterns**:
+
+- Read on startup and cache for performance
+- Update when external resources change (e.g., Asana project deleted)
+- Validate structure before storing to prevent data corruption
+- Automatic cleanup of invalid configurations with logging
 
 ---
 
@@ -120,8 +134,30 @@ C) **UI native form** → API same as (A).
 
 **Asana "Pending Projects"**
 
-- On first run, create project if missing, add sections: _Filled Questionnaire_, _Brand Origin Doc Phase_, _Budget/Timeline Phase_, _Finalized_, _Rejected_; persist gids; register webhook(s). ([ai-sdk.dev][12], [developers.asana.com][4])
-- Add task per intake; assign PM; store mapping in DB.
+- The "Pending Projects" board is a **persistent, global resource** stored in the `global_configs` table under key `asana_pending_projects`
+- **Database-first approach**: Check if configuration exists → verify board exists in Asana → create only if missing/invalid
+- Configuration structure stored in database:
+  ```json
+  {
+    "projectGid": "1234567890",
+    "sections": {
+      "Filled Questionnaire": "section_gid_1",
+      "Brand Origin Doc Phase": "section_gid_2",
+      "Budget/Timeline Phase": "section_gid_3",
+      "Finalized": "section_gid_4",
+      "Rejected": "section_gid_5"
+    },
+    "lastVerified": "2025-09-11T00:00:00Z",
+    "workspaceGid": "workspace_gid"
+  }
+  ```
+- **Edge case handling**:
+  - If entire board is deleted from Asana → detects and recreates full project
+  - If only some sections are missing → recreates missing sections only (minimal disruption)
+  - If sections fail to recreate → falls back to full project recreation
+- **Verification process**: On each form submission, quickly verify stored projectGid exists in Asana without recreating
+- **Incremental repair**: Minimally invasive - only recreates what's actually missing
+- Add task per intake; assign PM; store mapping in DB. ([ai-sdk.dev][12], [developers.asana.com][4])
 
 **Notify PM**
 

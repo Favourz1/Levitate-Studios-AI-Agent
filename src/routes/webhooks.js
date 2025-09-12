@@ -11,7 +11,8 @@ const {
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { getPrismaClient, withTransaction } = require("@/database");
 const { AsanaIntegration } = require("@/integrations/asana");
-const { BrevoIntegration } = require("@/integrations/brevo");
+const { brevoIntegration } = require("@/integrations/brevo");
+const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
 
 const router = Router();
 const logger = createLogger("routes:webhooks");
@@ -32,18 +33,18 @@ const validateAppsScriptSignature = (req) => {
     const signatureHeader = req.headers["x-apps-script-signature"];
     const responseId = req.headers["x-form-response-id"];
 
-    logger.debug({
-      message: "Validating Apps Script signature",
-      debugInfo,
-      headers: {
-        signature: signatureHeader
-          ? `${signatureHeader.substring(0, 8)}...`
-          : null,
-        responseId: responseId,
-        contentType: req.headers["content-type"],
-        userAgent: req.headers["user-agent"],
-      },
-    });
+    // logger.debug({
+    //   message: "Validating Apps Script signature",
+    //   debugInfo,
+    //   headers: {
+    //     signature: signatureHeader
+    //       ? `${signatureHeader.substring(0, 8)}...`
+    //       : null,
+    //     responseId: responseId,
+    //     contentType: req.headers["content-type"],
+    //     userAgent: req.headers["user-agent"],
+    //   },
+    // });
 
     // Header validation
     if (!secretHeader || typeof secretHeader !== "string") {
@@ -483,25 +484,350 @@ const generateReplyToAddress = (clientId, projectId) => {
   return `clients-${clientId}-${projectId}@${domain}`;
 };
 
-// Helper function to create or get "Pending Projects" board
-const ensurePendingProjectsBoard = async (asanaIntegration) => {
-  // Check if we already have the board info in config/database
+/**
+ * Ensures the "Pending Projects" board exists in Asana and returns its configuration.
+ * This function implements a database-first approach:
+ * 1. Check if configuration exists in database
+ * 2. If exists, verify the project still exists in Asana
+ * 3. If doesn't exist or verification fails, create/recreate and store in database
+ *
+ * This prevents recreating the board on every form submission and provides
+ * edge case handling if the board is accidentally deleted.
+ *
+ * @param {AsanaIntegration} asanaIntegration - Initialized Asana integration instance
+ * @returns {Promise<{projectGid: string, sections: Object}>} Pending Projects board configuration
+ * @throws {Error} If board setup fails after all retry attempts
+ */
+const ensureAsanaPendingProjectsBoard = async (asanaIntegration) => {
+  const startTime = Date.now();
+  const correlationId = crypto.randomUUID();
+
   try {
-    // First check if we have it stored somewhere - for now we'll create it each time
-    // In production you'd want to store this in a config table or environment variable
+    logger.info(
+      { correlationId },
+      "Starting Pending Projects board verification"
+    );
+
+    // Step 1: Check if we have stored configuration
+    let storedConfig = null;
+    try {
+      storedConfig = await getConfig(CONFIG_KEYS.ASANA_PENDING_PROJECTS);
+      if (storedConfig) {
+        logger.debug(
+          {
+            correlationId,
+            projectGid: storedConfig.projectGid,
+            sectionsCount: Object.keys(storedConfig.sections || {}).length,
+          },
+          "Found stored Pending Projects configuration"
+        );
+      }
+    } catch (configError) {
+      logger.warn(
+        {
+          correlationId,
+          error: configError.message,
+        },
+        "Failed to retrieve stored configuration, will create new"
+      );
+    }
+
+    // Step 2: If we have stored config, validate and verify it
+    if (storedConfig && storedConfig.projectGid) {
+      // First validate the stored configuration structure
+      if (!validateStoredSections(storedConfig)) {
+        logger.warn(
+          {
+            correlationId,
+            projectGid: storedConfig.projectGid,
+          },
+          "Stored configuration has invalid section structure"
+        );
+
+        await cleanupInvalidPendingProjectsConfig(
+          "Invalid section structure",
+          correlationId
+        );
+      } else {
+        // Configuration structure is valid, verify against Asana
+        try {
+          logger.debug(
+            {
+              correlationId,
+              projectGid: storedConfig.projectGid,
+            },
+            "Verifying existing project in Asana"
+          );
+
+          // Try to get project details to verify it exists
+          const existingProject = await asanaIntegration.getProject(
+            storedConfig.projectGid
+          );
+
+          if (
+            existingProject &&
+            existingProject.gid === storedConfig.projectGid
+          ) {
+            // Verify sections still exist
+            const existingSections = await asanaIntegration.getProjectSections(
+              storedConfig.projectGid
+            );
+            const existingSectionGids = new Set(
+              existingSections.map((s) => s.gid)
+            );
+
+            // Check if all required sections exist
+            const requiredSections = [
+              "Filled Questionnaire",
+              "Brand Origin Doc Phase",
+              "Budget/Timeline Phase",
+              "Finalized",
+              "Rejected",
+            ];
+
+            const allSectionsExist = requiredSections.every((sectionName) => {
+              const sectionGid = storedConfig.sections[sectionName];
+              return sectionGid && existingSectionGids.has(sectionGid);
+            });
+
+            if (allSectionsExist) {
+              logger.info(
+                {
+                  correlationId,
+                  projectGid: storedConfig.projectGid,
+                  duration: Date.now() - startTime,
+                },
+                "Pending Projects board verified successfully"
+              );
+
+              return {
+                projectGid: storedConfig.projectGid,
+                sections: storedConfig.sections,
+              };
+            } else {
+              // Only recreate missing sections, don't delete the entire project
+              logger.warn(
+                {
+                  correlationId,
+                  projectGid: storedConfig.projectGid,
+                },
+                "Some sections are missing, will recreate missing sections only"
+              );
+
+              const missingSections = requiredSections.filter((sectionName) => {
+                const sectionGid = storedConfig.sections[sectionName];
+                return !sectionGid || !existingSectionGids.has(sectionGid);
+              });
+
+              logger.info(
+                {
+                  correlationId,
+                  projectGid: storedConfig.projectGid,
+                  missingSections,
+                },
+                "Recreating missing sections"
+              );
+
+              // Recreate only missing sections
+              const updatedSections = { ...storedConfig.sections };
+              const sectionErrors = [];
+
+              for (const sectionName of missingSections) {
+                try {
+                  logger.debug(
+                    {
+                      correlationId,
+                      projectGid: storedConfig.projectGid,
+                      sectionName,
+                    },
+                    "Creating missing section"
+                  );
+
+                  const section = await asanaIntegration.createSection(
+                    storedConfig.projectGid,
+                    sectionName
+                  );
+
+                  if (!section || !section.gid) {
+                    throw new Error(
+                      `Invalid section response for ${sectionName}`
+                    );
+                  }
+
+                  updatedSections[sectionName] = section.gid;
+                  logger.info(
+                    {
+                      correlationId,
+                      sectionName,
+                      sectionGid: section.gid,
+                    },
+                    "Missing section recreated successfully"
+                  );
+                } catch (sectionError) {
+                  logger.error(
+                    {
+                      correlationId,
+                      sectionName,
+                      error: sectionError.message,
+                    },
+                    "Failed to recreate missing section"
+                  );
+                  sectionErrors.push(
+                    `Failed to recreate section "${sectionName}": ${sectionError.message}`
+                  );
+                }
+              }
+
+              // Check if all missing sections were successfully recreated
+              const stillMissingSections = missingSections.filter(
+                (name) => !updatedSections[name]
+              );
+              if (stillMissingSections.length > 0) {
+                logger.error(
+                  {
+                    correlationId,
+                    projectGid: storedConfig.projectGid,
+                    stillMissingSections,
+                    sectionErrors,
+                  },
+                  "Failed to recreate some sections, will fall back to full recreation"
+                );
+
+                // Only fall back to full recreation if we can't recreate sections
+                await cleanupInvalidPendingProjectsConfig(
+                  `Failed to recreate sections: ${stillMissingSections.join(
+                    ", "
+                  )}`,
+                  correlationId
+                );
+              } else {
+                // Successfully recreated all missing sections, update stored config
+                const updatedConfig = {
+                  ...storedConfig,
+                  sections: updatedSections,
+                  lastVerified: new Date().toISOString(),
+                };
+
+                try {
+                  await setConfig(
+                    CONFIG_KEYS.ASANA_PENDING_PROJECTS,
+                    updatedConfig,
+                    "Updated configuration after recreating missing sections"
+                  );
+
+                  logger.info(
+                    {
+                      correlationId,
+                      projectGid: storedConfig.projectGid,
+                      recreatedSections: missingSections,
+                      duration: Date.now() - startTime,
+                    },
+                    "Missing sections recreated and configuration updated"
+                  );
+
+                  return {
+                    projectGid: storedConfig.projectGid,
+                    sections: updatedSections,
+                  };
+                } catch (configError) {
+                  logger.error(
+                    {
+                      correlationId,
+                      projectGid: storedConfig.projectGid,
+                      error: configError.message,
+                    },
+                    "Failed to update configuration after recreating sections"
+                  );
+
+                  // Even if config update fails, sections were recreated successfully
+                  return {
+                    projectGid: storedConfig.projectGid,
+                    sections: updatedSections,
+                  };
+                }
+              }
+            }
+          } else {
+            logger.warn(
+              {
+                correlationId,
+                projectGid: storedConfig.projectGid,
+              },
+              "Project not found in Asana, will recreate"
+            );
+
+            await cleanupInvalidPendingProjectsConfig(
+              "Project not found in Asana",
+              correlationId
+            );
+          }
+        } catch (verificationError) {
+          logger.warn(
+            {
+              correlationId,
+              projectGid: storedConfig.projectGid,
+              error: verificationError.message,
+            },
+            "Failed to verify existing project, will create new"
+          );
+
+          // Check if it's a specific Asana error that indicates the project was deleted
+          if (
+            verificationError.message.includes("Not Found") ||
+            verificationError.message.includes("404") ||
+            verificationError.message.includes("does not exist")
+          ) {
+            await cleanupInvalidPendingProjectsConfig(
+              "Project deleted from Asana",
+              correlationId
+            );
+          }
+        }
+      }
+    }
+
+    // Step 3: Create or recreate the Pending Projects board
+    logger.info({ correlationId }, "Creating Pending Projects board");
 
     const projectName = "Pending Projects";
     const workspaceGid = appConfig.asana.workspaceGid;
 
-    logger.debug("Creating/ensuring Pending Projects board exists");
+    if (!workspaceGid) {
+      throw new Error("Asana workspace GID not configured");
+    }
 
-    // Create the project if it doesn't exist
-    const project = await asanaIntegration.createProject(
-      projectName,
-      workspaceGid
-    );
+    // Create the project
+    let project;
+    try {
+      project = await asanaIntegration.createProject(projectName, workspaceGid);
 
-    // Define the sections we need
+      if (!project || !project.gid) {
+        throw new Error(
+          "Failed to create project - invalid response from Asana"
+        );
+      }
+
+      logger.info(
+        {
+          correlationId,
+          projectGid: project.gid,
+        },
+        "Pending Projects project created successfully"
+      );
+    } catch (createError) {
+      logger.error(
+        {
+          correlationId,
+          error: createError.message,
+        },
+        "Failed to create Pending Projects project"
+      );
+      throw new Error(
+        `Failed to create Pending Projects project: ${createError.message}`
+      );
+    }
+
+    // Step 4: Create required sections
     const requiredSections = [
       "Filled Questionnaire",
       "Brand Origin Doc Phase",
@@ -510,23 +836,49 @@ const ensurePendingProjectsBoard = async (asanaIntegration) => {
       "Rejected",
     ];
 
-    // Create sections
     const sections = {};
+    const sectionErrors = [];
+
     for (const sectionName of requiredSections) {
       try {
+        logger.debug(
+          {
+            correlationId,
+            projectGid: project.gid,
+            sectionName,
+          },
+          "Creating section"
+        );
+
         const section = await asanaIntegration.createSection(
           project.gid,
           sectionName
         );
+
+        if (!section || !section.gid) {
+          throw new Error(`Invalid section response for ${sectionName}`);
+        }
+
         sections[sectionName] = section.gid;
         logger.debug(
-          `Created section: ${sectionName} with GID: ${section.gid}`
+          {
+            correlationId,
+            sectionName,
+            sectionGid: section.gid,
+          },
+          "Section created successfully"
         );
-      } catch (error) {
-        // Section might already exist, try to get existing sections
+      } catch (sectionError) {
         logger.warn(
-          `Failed to create section ${sectionName}, it might already exist: ${error.message}`
+          {
+            correlationId,
+            sectionName,
+            error: sectionError.message,
+          },
+          "Failed to create section, trying to find existing"
         );
+
+        // Try to find existing section
         try {
           const existingSections = await asanaIntegration.getProjectSections(
             project.gid
@@ -534,29 +886,192 @@ const ensurePendingProjectsBoard = async (asanaIntegration) => {
           const existingSection = existingSections.find(
             (s) => s.name === sectionName
           );
-          if (existingSection) {
+
+          if (existingSection && existingSection.gid) {
             sections[sectionName] = existingSection.gid;
-            logger.debug(
-              `Found existing section: ${sectionName} with GID: ${existingSection.gid}`
+            logger.info(
+              {
+                correlationId,
+                sectionName,
+                sectionGid: existingSection.gid,
+              },
+              "Found existing section"
+            );
+          } else {
+            sectionErrors.push(
+              `Section "${sectionName}" not found and could not be created`
             );
           }
         } catch (getError) {
-          logger.error(`Failed to get existing sections: ${getError.message}`);
-          throw error;
+          logger.error(
+            {
+              correlationId,
+              sectionName,
+              error: getError.message,
+            },
+            "Failed to get existing sections"
+          );
+          sectionErrors.push(
+            `Failed to create or find section "${sectionName}": ${sectionError.message}`
+          );
         }
       }
     }
+
+    // Validate that all required sections were created/found
+    const missingSections = requiredSections.filter((name) => !sections[name]);
+    if (missingSections.length > 0) {
+      const errorMessage = `Missing required sections: ${missingSections.join(
+        ", "
+      )}`;
+      logger.error(
+        {
+          correlationId,
+          projectGid: project.gid,
+          missingSections,
+          sectionErrors,
+        },
+        errorMessage
+      );
+      throw new Error(errorMessage);
+    }
+
+    // Step 5: Store configuration in database
+    const configValue = {
+      projectGid: project.gid,
+      sections,
+      lastVerified: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      workspaceGid,
+    };
+
+    try {
+      await setConfig(
+        CONFIG_KEYS.ASANA_PENDING_PROJECTS,
+        configValue,
+        "Configuration for the persistent Pending Projects board in Asana"
+      );
+
+      logger.info(
+        {
+          correlationId,
+          projectGid: project.gid,
+          sectionsCount: Object.keys(sections).length,
+        },
+        "Pending Projects configuration stored in database"
+      );
+    } catch (configError) {
+      logger.error(
+        {
+          correlationId,
+          projectGid: project.gid,
+          error: configError.message,
+        },
+        "Failed to store configuration in database - board created but not cached"
+      );
+
+      // Don't fail the entire operation if we can't store config
+      // The board was created successfully
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info(
+      {
+        correlationId,
+        projectGid: project.gid,
+        sectionsCount: Object.keys(sections).length,
+        duration,
+      },
+      "Pending Projects board setup completed successfully"
+    );
 
     return {
       projectGid: project.gid,
       sections,
     };
   } catch (error) {
-    logger.error(`Failed to ensure Pending Projects board: ${error.message}`);
+    const duration = Date.now() - startTime;
+    logger.error(
+      {
+        correlationId,
+        error: error.message,
+        stack: error.stack,
+        duration,
+      },
+      "Failed to ensure Pending Projects board"
+    );
+
     throw new Error(
       `Failed to setup Asana Pending Projects board: ${error.message}`
     );
   }
+};
+
+/**
+ * Helper function to clean up invalid Pending Projects configuration
+ * This handles edge cases where the configuration exists but references
+ * deleted/invalid Asana resources
+ *
+ * @param {string} reason - Reason for cleanup
+ * @param {string} correlationId - Correlation ID for logging
+ */
+const cleanupInvalidPendingProjectsConfig = async (reason, correlationId) => {
+  try {
+    logger.warn(
+      { correlationId, reason },
+      "Cleaning up invalid Pending Projects configuration"
+    );
+
+    await setConfig(
+      CONFIG_KEYS.ASANA_PENDING_PROJECTS,
+      null,
+      `Configuration invalidated: ${reason}`
+    );
+
+    logger.info({ correlationId, reason }, "Invalid configuration cleaned up");
+  } catch (cleanupError) {
+    logger.error(
+      {
+        correlationId,
+        reason,
+        error: cleanupError.message,
+      },
+      "Failed to cleanup invalid configuration"
+    );
+    // Don't throw - this is cleanup, not critical
+  }
+};
+
+/**
+ * Validates that all required sections exist in the stored configuration
+ * @param {Object} storedConfig - Configuration from database
+ * @returns {boolean} True if all sections are present and valid
+ */
+const validateStoredSections = (storedConfig) => {
+  if (
+    !storedConfig ||
+    !storedConfig.sections ||
+    typeof storedConfig.sections !== "object"
+  ) {
+    return false;
+  }
+
+  const requiredSections = [
+    "Filled Questionnaire",
+    "Brand Origin Doc Phase",
+    "Budget/Timeline Phase",
+    "Finalized",
+    "Rejected",
+  ];
+
+  return requiredSections.every((sectionName) => {
+    const sectionGid = storedConfig.sections[sectionName];
+    return (
+      sectionGid &&
+      typeof sectionGid === "string" &&
+      sectionGid.trim().length > 0
+    );
+  });
 };
 
 // Helper function to get PM user GID (you'd configure this based on your team setup)
@@ -810,7 +1325,9 @@ const handleAsanaAndNotifications = async (processedData, correlationId) => {
     }
 
     // Step 1: Ensure "Pending Projects" board exists
-    const pendingBoard = await ensurePendingProjectsBoard(asanaIntegration);
+    const pendingBoard = await ensureAsanaPendingProjectsBoard(
+      asanaIntegration
+    );
 
     // Step 2: Get PM user GID
     const pmUserGid = await getPMUserGid();
@@ -888,7 +1405,7 @@ Reply-to address for client communication: ${emailThread.replyToAddress}`;
         assigneeGid: pmUserGid,
         meta: {
           taskName,
-          createdBy: "SYSTEM",
+          createdBy: "AI AGENT SYSTEM",
           correlationId,
         },
         createdAt: new Date(),
@@ -936,7 +1453,6 @@ const sendPMNotification = async (
   correlationId
 ) => {
   try {
-    const brevoIntegration = new BrevoIntegration();
     const prisma = getPrismaClient();
 
     // Get PM email address
@@ -955,6 +1471,7 @@ const sendPMNotification = async (
       return;
     }
 
+    // TODO: Move to an email template file for email templates
     const subject = `New Project Questionnaire: ${client.name} - ${project.name}`;
     const htmlContent = `
       <h2>New Questionnaire Submission Received</h2>
@@ -987,7 +1504,7 @@ const sendPMNotification = async (
       to: [pmMember.email],
       subject,
       htmlContent,
-      replyTo: emailThread.replyToAddress,
+      // replyTo: emailThread.replyToAddress,
     });
 
     logger.info(
@@ -1101,7 +1618,7 @@ router.post(
         responseId: parsedBody.responseId,
       });
 
-      console.log("parsedBody", parsedBody);
+      logger.debug({ parsedBody }, "Parsed form payload for processing");
       // Step 5: Continue with form processing
 
       // Step 6: Process the form submission (database operations)
@@ -1120,9 +1637,13 @@ router.post(
           projectId: processedData.project.id,
         });
       } catch (processingError) {
-        console.log(
-          "processingError from processFormSubmission",
-          processingError
+        logger.error(
+          {
+            processingError: processingError.message,
+            stack: processingError.stack,
+            correlationId,
+          },
+          "Detailed processing error from processFormSubmission"
         );
         logger.error({
           message: "Form processing failed",
@@ -1172,7 +1693,6 @@ router.post(
         timestamp: new Date().toISOString(),
         processingTime: Date.now() - startTime,
       });
-      return;
 
       // Step 8: Handle Asana task creation and notifications asynchronously
       // This runs in the background and doesn't block the response
@@ -1204,6 +1724,8 @@ router.post(
               error: asanaResult.error,
             });
           }
+
+          // TODO: Start immediate background cron job for creating brand origin document.
         } catch (asyncError) {
           logger.error({
             message: "Async processing failed completely",
