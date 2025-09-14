@@ -86,6 +86,9 @@ const teamRoleSchema = z.enum([
   TeamRole.DIGITAL_MARKETER,
   TeamRole.MOTION_GRAPHICS_DESIGNER,
   TeamRole.FINANCE_MANAGER,
+  TeamRole.HR_MANAGER,
+  TeamRole.ART_DIRECTOR,
+  TeamRole.CLIENT_SERVICE,
 ]);
 
 // Base schemas
