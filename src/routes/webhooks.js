@@ -13,6 +13,7 @@ const { getPrismaClient, withTransaction } = require("@/database");
 const { AsanaIntegration } = require("@/integrations/asana");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
+const { TeamRole } = require("@/constants");
 
 const router = Router();
 const logger = createLogger("routes:webhooks");
@@ -1079,24 +1080,39 @@ const getPMUserGid = async () => {
   const prisma = getPrismaClient();
 
   try {
-    // Look for a team member with PM role and lead status
-    const pmMember = await prisma.teamMember.findFirst({
+    // First try to find a lead project manager
+    let pmMember = await prisma.teamMember.findFirst({
       where: {
         isActive: true,
         roles: {
-          path: "$[*].role",
-          array_contains: "Project manager",
+          path: "$[*]",
+          array_contains: {
+            role: TeamRole.PROJECT_MANAGER,
+            isLead: true,
+          },
         },
       },
     });
+
+    // If no lead PM found, fall back to any project manager
+    if (!pmMember) {
+      pmMember = await prisma.teamMember.findFirst({
+        where: {
+          isActive: true,
+          roles: {
+            path: "$[*].role",
+            array_contains: TeamRole.PROJECT_MANAGER,
+          },
+        },
+      });
+    }
 
     if (pmMember && pmMember.asanaUserGid) {
       return pmMember.asanaUserGid;
     }
 
-    // Fallback - you might want to configure a default PM GID in environment variables
-    logger.warn("No PM found in team members, using default or null");
-    return null; // Or return a default PM GID from environment
+    logger.warn("No active project manager found in team members");
+    return null;
   } catch (error) {
     logger.error(`Failed to get PM user GID: ${error.message}`);
     return null;
@@ -1405,7 +1421,7 @@ Reply-to address for client communication: ${emailThread.replyToAddress}`;
         assigneeGid: pmUserGid,
         meta: {
           taskName,
-          createdBy: "AI AGENT SYSTEM",
+          createdBy: "LEVITATE AI AGENT SYSTEM",
           correlationId,
         },
         createdAt: new Date(),
@@ -1461,7 +1477,7 @@ const sendPMNotification = async (
         isActive: true,
         roles: {
           path: "$[*].role",
-          array_contains: "Project manager",
+          array_contains: TeamRole.PROJECT_MANAGER,
         },
       },
     });
