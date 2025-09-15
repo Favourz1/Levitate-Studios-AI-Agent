@@ -6,13 +6,13 @@ const { retry, sleep } = require("@/utils");
 
 const logger = createLogger("integration:asana");
 
-// Asana API client
+// Asana API client for v3 SDK
 class AsanaIntegration {
   constructor() {
-    // Validate that asana module is available
-    if (!asana || !asana.Client) {
+    // Validate that asana module is available and has v3 structure
+    if (!asana || !asana.ApiClient) {
       throw new Error(
-        "Asana client library is not properly installed or imported"
+        "Asana client library is not properly installed or imported. Expected v3 SDK structure."
       );
     }
 
@@ -22,20 +22,40 @@ class AsanaIntegration {
     }
 
     try {
-      this.client = asana.Client.create().useAccessToken(
-        appConfig.asana.accessToken
-      );
+      // Initialize v3 SDK client
+      this.apiClient = asana.ApiClient.instance;
 
-      // Validate the client was created successfully
-      if (!this.client) {
-        throw new Error("Failed to create Asana client");
+      // Configure authentication
+      const token = this.apiClient.authentications["token"];
+      if (!token) {
+        throw new Error("Token authentication not available in Asana client");
+      }
+      token.accessToken = appConfig.asana.accessToken;
+
+      // Initialize API instances
+      this.projectsApi = new asana.ProjectsApi();
+      this.sectionsApi = new asana.SectionsApi();
+      this.workspacesApi = new asana.WorkspacesApi();
+      this.usersApi = new asana.UsersApi();
+      this.webhooksApi = new asana.WebhooksApi();
+      this.teamsApi = new asana.TeamsApi();
+
+      // Initialize TasksApi
+      this.tasksApi = new asana.TasksApi();
+
+      // Initialize StoriesApi for comments
+      this.storiesApi = new asana.StoriesApi();
+
+      // Validate the client was configured successfully
+      if (!this.apiClient || !this.projectsApi) {
+        throw new Error("Failed to initialize Asana v3 client");
       }
 
-      logger.info("Asana client initialized successfully");
+      logger.info("Asana v3 client initialized successfully");
     } catch (error) {
       logger.error(
         { error: error.message },
-        "Failed to initialize Asana client"
+        "Failed to initialize Asana v3 client"
       );
       throw new AsanaError("client_initialization", error);
     }
@@ -67,9 +87,15 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const workspace = await this.client.workspaces.getWorkspace(
-              appConfig.asana.workspaceGid
+            const workspaceGid = appConfig.asana.workspaceGid;
+            const opts = {};
+
+            const response = await this.workspacesApi.getWorkspace(
+              workspaceGid,
+              opts
             );
+            const workspace = response.data;
+
             return {
               gid: workspace.gid,
               name: workspace.name,
@@ -100,26 +126,78 @@ class AsanaIntegration {
   }
 
   // Create a new project
-  async createProject(name, notes, team) {
+  async createProject(name, notes = "", team = null) {
     const startTime = Date.now();
 
     try {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const project = await this.client.projects.createProject({
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            const projectData = {
               name,
-              notes,
-              team: team || appConfig.asana.workspaceGid,
               workspace: appConfig.asana.workspaceGid,
               layout: "board",
-            });
+            };
+
+            // Add notes if provided and not empty
+            if (notes && notes.trim().length > 0) {
+              projectData.notes = notes;
+            }
+
+            // For organization workspaces, team is usually required
+            // If no team is provided, try to get a default team
+            if (team) {
+              projectData.team = team;
+            } else {
+              // Try to get a default team from the workspace
+              try {
+                const teams = await this.getTeamsForWorkspace();
+                if (teams && teams.length > 0) {
+                  projectData.team = teams[0].gid;
+                  logger.info(
+                    `Using default team: ${teams[0].gid} (${teams[0].name}) for project creation`
+                  );
+                } else {
+                  logger.info(
+                    "No teams found in workspace, creating project without team (personal workspace)"
+                  );
+                }
+              } catch (teamError) {
+                logger.warn(
+                  "Could not fetch teams for workspace, will attempt project creation without team",
+                  teamError
+                );
+                // Don't add team field if we can't fetch teams - might be a personal workspace
+              }
+            }
+
+            const requestBody = {
+              data: projectData,
+            };
+
+            const opts = {};
+            const response = await this.projectsApi.createProject(
+              requestBody,
+              opts
+            );
+
+            // Extract project data from response
+            const project = response.data;
+
+            // Validate response structure
+            if (!project || !project.gid) {
+              throw new Error(
+                "Invalid response from Asana API: missing project data"
+              );
+            }
 
             return {
               gid: project.gid,
-              name: project.name,
-              notes: project.notes,
+              name: project.name || name,
+              notes: project.notes || "",
               team: project.team?.gid || "",
+              workspace: project.workspace?.gid || appConfig.asana.workspaceGid,
             };
           });
         },
@@ -157,7 +235,12 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const project = await this.client.projects.getProject(projectGid);
+            const opts = {};
+            const response = await this.projectsApi.getProject(
+              projectGid,
+              opts
+            );
+            const project = response.data;
 
             return {
               gid: project.gid,
@@ -190,16 +273,33 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const section = await this.client.sections.createSectionForProject(
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            // NOTE: project_gid is passed as URL parameter, NOT in the data body
+            const opts = {
+              body: {
+                data: {
+                  name,
+                  // Do NOT include project field - it's already in the URL path
+                },
+              },
+            };
+
+            const response = await this.sectionsApi.createSectionForProject(
               projectGid,
-              {
-                name,
-              }
+              opts
             );
+            const section = response.data;
+
+            // Validate response structure
+            if (!section || !section.gid) {
+              throw new Error(
+                "Invalid response from Asana API: missing section data"
+              );
+            }
 
             return {
               gid: section.gid,
-              name: section.name,
+              name: section.name || name,
             };
           });
         },
@@ -236,11 +336,13 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const sections = await this.client.sections.getSectionsForProject(
-              projectGid
+            const opts = {};
+            const response = await this.sectionsApi.getSectionsForProject(
+              projectGid,
+              opts
             );
 
-            return sections.data.map((section) => ({
+            return response.data.map((section) => ({
               gid: section.gid,
               name: section.name,
             }));
@@ -278,14 +380,24 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
+            // Prepare the request body according to Asana SDK v3.1.1 format
             const taskData = {
               name,
               notes,
               projects: [projectGid],
-              assignee: assigneeGid,
-              due_on: dueOn,
             };
 
+            // Only add assignee if provided
+            if (assigneeGid) {
+              taskData.assignee = assigneeGid;
+            }
+
+            // Only add due date if provided
+            if (dueOn) {
+              taskData.due_on = dueOn;
+            }
+
+            // Only add memberships if sectionGid is provided
             if (sectionGid) {
               taskData.memberships = [
                 {
@@ -295,14 +407,27 @@ class AsanaIntegration {
               ];
             }
 
-            const task = await this.client.tasks.createTask(taskData);
+            const requestBody = {
+              data: taskData,
+            };
+
+            const opts = {};
+            const response = await this.tasksApi.createTask(requestBody, opts);
+            const task = response.data;
+
+            // Validate response structure
+            if (!task || !task.gid) {
+              throw new Error(
+                "Invalid response from Asana API: missing task data"
+              );
+            }
 
             return {
               gid: task.gid,
-              name: task.name,
-              notes: task.notes,
-              assignee: task.assignee?.gid,
-              due_on: task.due_on,
+              name: task.name || name,
+              notes: task.notes || "",
+              assignee: task.assignee?.gid || null,
+              due_on: task.due_on || null,
               projects: task.projects?.map((p) => p.gid) || [],
               memberships: task.memberships || [],
             };
@@ -337,7 +462,18 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const task = await this.client.tasks.updateTask(taskGid, updates);
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            const requestBody = {
+              data: updates,
+            };
+
+            const opts = {};
+            const response = await this.tasksApi.updateTask(
+              requestBody,
+              taskGid,
+              opts
+            );
+            const task = response.data;
 
             return {
               gid: task.gid,
@@ -373,9 +509,16 @@ class AsanaIntegration {
       await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            await this.client.sections.addTaskForSection(sectionGid, {
-              task: taskGid,
-            });
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            const opts = {
+              body: {
+                data: {
+                  task: taskGid,
+                },
+              },
+            };
+
+            await this.sectionsApi.addTaskForSection(sectionGid, opts);
           });
         },
         3,
@@ -410,18 +553,33 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const story = await this.client.stories.createStoryForTask(
-              taskGid,
-              {
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            const requestBody = {
+              data: {
                 text,
                 html_text: htmlText,
-              }
+              },
+            };
+
+            const opts = {};
+            const response = await this.storiesApi.createStoryForTask(
+              requestBody,
+              taskGid,
+              opts
             );
+            const story = response.data;
+
+            // Validate response structure
+            if (!story || !story.gid) {
+              throw new Error(
+                "Invalid response from Asana API: missing story data"
+              );
+            }
 
             return {
               gid: story.gid,
-              text: story.text,
-              created_at: story.created_at,
+              text: story.text || text,
+              created_at: story.created_at || new Date().toISOString(),
             };
           });
         },
@@ -455,11 +613,14 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const users = await this.client.users.getUsersForWorkspace(
-              appConfig.asana.workspaceGid
+            const workspaceGid = appConfig.asana.workspaceGid;
+            const opts = {};
+            const response = await this.usersApi.getUsersForWorkspace(
+              workspaceGid,
+              opts
             );
 
-            return users.data.map((user) => ({
+            return response.data.map((user) => ({
               gid: user.gid,
               name: user.name,
               email: user.email,
@@ -488,6 +649,67 @@ class AsanaIntegration {
     }
   }
 
+  // Get teams for workspace
+  async getTeamsForWorkspace() {
+    const startTime = Date.now();
+
+    try {
+      const result = await retry(
+        async () => {
+          return this.handleRateLimit(async () => {
+            const workspaceGid = appConfig.asana.workspaceGid;
+            const opts = {};
+
+            const response = await this.teamsApi.getTeamsForWorkspace(
+              workspaceGid,
+              opts
+            );
+
+            // Validate response structure
+            if (!response || !response.data || !Array.isArray(response.data)) {
+              logger.warn(
+                "Invalid teams response from Asana API, returning empty array"
+              );
+              return [];
+            }
+
+            return response.data.map((team) => ({
+              gid: team.gid,
+              name: team.name || "Unnamed Team",
+            }));
+          });
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "getTeamsForWorkspace",
+        true,
+        duration
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "getTeamsForWorkspace",
+        false,
+        duration,
+        error
+      );
+
+      // Return empty array if teams can't be fetched (might be a personal workspace)
+      logger.warn("Could not fetch teams for workspace, returning empty array");
+      return [];
+    }
+  }
+
   // Create webhook
   async createWebhook(resourceGid, targetUrl, filters) {
     const startTime = Date.now();
@@ -496,11 +718,21 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const webhook = await this.client.webhooks.createWebhook({
-              resource: resourceGid,
-              target: targetUrl,
-              filters,
-            });
+            // Prepare the request body according to Asana SDK v3.1.1 format
+            const requestBody = {
+              data: {
+                resource: resourceGid,
+                target: targetUrl,
+                filters,
+              },
+            };
+
+            const opts = {};
+            const response = await this.webhooksApi.createWebhook(
+              requestBody,
+              opts
+            );
+            const webhook = response.data;
 
             return {
               gid: webhook.gid,
@@ -542,7 +774,8 @@ class AsanaIntegration {
       await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            await this.client.webhooks.deleteWebhook(webhookGid);
+            const opts = {};
+            await this.webhooksApi.deleteWebhook(webhookGid, opts);
           });
         },
         3,
@@ -573,15 +806,15 @@ class AsanaIntegration {
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            const tasks = await this.client.tasks.getTasksForProject(
+            const opts = {
+              opt_fields: "gid,name,notes,assignee,due_on,projects,memberships",
+            };
+            const response = await this.tasksApi.getTasksForProject(
               projectGid,
-              {
-                opt_fields:
-                  "gid,name,notes,assignee,due_on,projects,memberships",
-              }
+              opts
             );
 
-            return tasks.data.map((task) => ({
+            return response.data.map((task) => ({
               gid: task.gid,
               name: task.name,
               notes: task.notes,
@@ -622,7 +855,8 @@ class AsanaIntegration {
       await retry(
         async () => {
           return this.handleRateLimit(async () => {
-            await this.client.tasks.deleteTask(taskGid);
+            const opts = {};
+            await this.tasksApi.deleteTask(taskGid, opts);
           });
         },
         3,
@@ -639,5 +873,19 @@ class AsanaIntegration {
   }
 }
 
-// Export the class instead of singleton instance to avoid initialization issues
-module.exports = { AsanaIntegration };
+// Create singleton instance
+let asanaIntegration = null;
+
+const getAsanaIntegration = () => {
+  if (!asanaIntegration) {
+    asanaIntegration = new AsanaIntegration();
+  }
+  return asanaIntegration;
+};
+
+// Export both class and singleton instance
+module.exports = {
+  AsanaIntegration,
+  asanaIntegration: getAsanaIntegration(),
+  getAsanaIntegration,
+};
