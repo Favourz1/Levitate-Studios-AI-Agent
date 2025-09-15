@@ -3,6 +3,9 @@ const documentService = require("@/services/documentService");
 const emailService = require("@/services/emailService");
 const asanaService = require("@/services/asanaService");
 const clientService = require("@/services/clientService");
+const formSubmissionService = require("@/services/formSubmissionService");
+const asanaPendingProjectsService = require("@/services/asanaPendingProjectsService");
+const emailTemplateService = require("@/services/emailTemplateService");
 
 module.exports = {
   ...projectService,
@@ -10,4 +13,7 @@ module.exports = {
   ...emailService,
   ...asanaService,
   ...clientService,
+  ...formSubmissionService,
+  ...asanaPendingProjectsService,
+  ...emailTemplateService,
 };
