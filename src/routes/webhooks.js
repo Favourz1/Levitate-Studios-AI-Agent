@@ -10,7 +10,7 @@ const {
 } = require("@/middleware/errorHandler");
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { getPrismaClient, withTransaction } = require("@/database");
-const { AsanaIntegration } = require("@/integrations/asana");
+const { asanaIntegration } = require("@/integrations/asana");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
 const { TeamRole } = require("@/constants");
@@ -800,7 +800,11 @@ const ensureAsanaPendingProjectsBoard = async (asanaIntegration) => {
     // Create the project
     let project;
     try {
-      project = await asanaIntegration.createProject(projectName, workspaceGid);
+      project = await asanaIntegration.createProject(
+        projectName,
+        "AI Agent managed project for pending client submissions",
+        null // Let the method auto-detect the team
+      );
 
       if (!project || !project.gid) {
         throw new Error(
@@ -1076,7 +1080,7 @@ const validateStoredSections = (storedConfig) => {
 };
 
 // Helper function to get PM user GID (you'd configure this based on your team setup)
-const getPMUserGid = async () => {
+const getPMUser = async () => {
   const prisma = getPrismaClient();
 
   try {
@@ -1085,11 +1089,12 @@ const getPMUserGid = async () => {
       where: {
         isActive: true,
         roles: {
-          path: "$[*]",
-          array_contains: {
-            role: TeamRole.PROJECT_MANAGER,
-            isLead: true,
-          },
+          array_contains: [
+            {
+              role: TeamRole.PROJECT_MANAGER,
+              isLead: true,
+            },
+          ],
         },
       },
     });
@@ -1100,15 +1105,18 @@ const getPMUserGid = async () => {
         where: {
           isActive: true,
           roles: {
-            path: "$[*].role",
-            array_contains: TeamRole.PROJECT_MANAGER,
+            array_contains: [
+              {
+                role: TeamRole.PROJECT_MANAGER,
+              },
+            ],
           },
         },
       });
     }
 
     if (pmMember && pmMember.asanaUserGid) {
-      return pmMember.asanaUserGid;
+      return pmMember;
     }
 
     logger.warn("No active project manager found in team members");
@@ -1325,20 +1333,8 @@ const handleAsanaAndNotifications = async (processedData, correlationId) => {
       throw new Error("Invalid email thread data provided");
     }
 
-    // Initialize Asana integration
-    let asanaIntegration;
-    try {
-      asanaIntegration = new AsanaIntegration();
-    } catch (asanaError) {
-      logger.error(
-        {
-          error: asanaError.message,
-          correlationId,
-        },
-        "Failed to initialize Asana integration"
-      );
-      throw new Error(`Asana initialization failed: ${asanaError.message}`);
-    }
+    // Use the singleton Asana integration instance
+    // The instance is already initialized and ready to use
 
     // Step 1: Ensure "Pending Projects" board exists
     const pendingBoard = await ensureAsanaPendingProjectsBoard(
@@ -1346,7 +1342,8 @@ const handleAsanaAndNotifications = async (processedData, correlationId) => {
     );
 
     // Step 2: Get PM user GID
-    const pmUserGid = await getPMUserGid();
+    const pmUser = await getPMUser();
+    const pmUserGid = pmUser.asanaUserGid;
 
     // Step 3: Create task in "Filled Questionnaire" section
     const taskName = `${client.name} - ${project.name}`;
@@ -1364,8 +1361,7 @@ const handleAsanaAndNotifications = async (processedData, correlationId) => {
 
 **Next Steps:**
 - Review questionnaire responses
-- Generate brand origin document
-- Move to "Brand Origin Doc Phase" when ready
+- Review brand origin document when ready
 
 Reply-to address for client communication: ${emailThread.replyToAddress}`;
 
@@ -1469,18 +1465,8 @@ const sendPMNotification = async (
   correlationId
 ) => {
   try {
-    const prisma = getPrismaClient();
-
     // Get PM email address
-    const pmMember = await prisma.teamMember.findFirst({
-      where: {
-        isActive: true,
-        roles: {
-          path: "$[*].role",
-          array_contains: TeamRole.PROJECT_MANAGER,
-        },
-      },
-    });
+    const pmMember = await getPMUser();
 
     if (!pmMember || !pmMember.email) {
       logger.warn("No PM email found for notification");
@@ -1500,14 +1486,14 @@ const sendPMNotification = async (
       </ul>
       
       <h3>Next Steps</h3>
-      <p>A new questionnaire has been submitted and is ready for review. The system will automatically generate a brand origin document.</p>
+      <p>A new questionnaire has been submitted and is ready for review. The system will automatically generate a brand origin document and inform you also.</p>
       
-      <p>
+      <!-- <p>
         <a href="${appConfig.server.frontendUrl}/admin/projects/${project.id}" 
            style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
           Review Project →
         </a>
-      </p>
+      </p> -->
       
       <h3>Communication</h3>
       <p><strong>Client Reply-to:</strong> ${emailThread.replyToAddress}</p>
