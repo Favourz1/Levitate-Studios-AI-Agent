@@ -97,9 +97,12 @@ const checkDatabaseHealth = async () => {
 };
 
 // Transaction helper
-const withTransaction = async (callback) => {
+const withTransaction = async (callback, options = {}) => {
   const client = getPrismaClient();
-  return client.$transaction(callback);
+  return client.$transaction(callback, {
+    timeout: options.timeout || 5000, // Default 5 seconds, can be overridden
+    ...options,
+  });
 };
 
 module.exports = {
