@@ -138,5 +138,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Google IAM JSON file
+src/config/iam.json
+
 # Dev only Files
 scripts/seed-team-members.js
+
+AI-Context
