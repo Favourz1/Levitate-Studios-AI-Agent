@@ -89,7 +89,7 @@ app.use(userAgentLogger);
 // app.use(rateLimits.apiWithHealthSkip);
 
 // API routes
-app.use("/api", apiRouter);
+app.use("/api/v1", apiRouter);
 
 // Root redirect
 app.get(
