@@ -255,7 +255,7 @@ class EmailTemplateService {
                 <ol>
                   <li><strong>Review the document</strong> for accuracy and strategic alignment</li>
                   <li><strong>Edit directly in Google Docs</strong> if changes are needed</li>
-                  <li><strong>Send to client</strong> when ready for client review</li>
+                  <li><strong>Send to client from this email</strong> when ready for client review</li>
                 </ol>
               </div>
 
@@ -276,7 +276,7 @@ class EmailTemplateService {
                   <li><strong>Google Doc:</strong> <a href="${
                     documentResult.webViewLink
                   }" target="_blank">Open in Google Docs</a></li>
-                  <li><strong>Admin Panel:</strong> <a href="${reviewUrl}" target="_blank">Review in Admin</a></li>
+                  <!-- <li><strong>Admin Panel:</strong> <a href="${reviewUrl}" target="_blank">Review in Admin</a></li> -->
                   ${
                     emailThread
                       ? `<li><strong>Client Email:</strong> ${emailThread.replyToAddress}</li>`

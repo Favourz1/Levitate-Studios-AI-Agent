@@ -21,6 +21,7 @@ const {
 
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
+const { appConfig } = require("@/config");
 
 /**
  * Brand Origin Document Generation Processor
@@ -64,7 +65,7 @@ const brandOriginGenerationProcessor = async (job) => {
     await updateAsanaWorkflow(context, documentResult, correlationId);
 
     // Step 5: Send PM notification email
-    await sendPMNotificationEmail(context, documentResult, correlationId);
+    await sendPMAdminNotificationEmail(context, documentResult, correlationId);
 
     const duration = Date.now() - startTime;
 
@@ -473,7 +474,6 @@ async function createDocumentRecords(
       brandOriginDocument.document,
       {
         folderId,
-        shareWithTeam: true,
         makePublicReadable: false,
       }
     );
@@ -592,7 +592,7 @@ async function createDocumentRecords(
                 documentId: documentRecord.document.id,
                 error: error.message,
                 correlationId,
-                failureStage: "google_doc_creation",
+                stage: "google_doc_creation",
               },
               at: new Date(),
             },
@@ -873,9 +873,15 @@ ${
  * Send PM notification email with Review/Send buttons
  * @param {Object} context - Project context
  * @param {Object} documentResult - Created document information
+ * @param {string} documentType - Type of document (BRAND_ORIGIN, BUDGET_TIMELINE, BUDGET_TIMELINE_VARIANT)
  * @param {string} correlationId - Correlation ID for tracking
  */
-async function sendPMNotificationEmail(context, documentResult, correlationId) {
+async function sendPMAdminNotificationEmail(
+  context,
+  documentResult,
+  documentType,
+  correlationId
+) {
   try {
     // Get PM email address
     const pmUser = await AsanaPendingProjectsService.getPMUser(
@@ -894,18 +900,38 @@ async function sendPMNotificationEmail(context, documentResult, correlationId) {
     }
 
     // Generate email template
-    const emailTemplate =
-      EmailTemplateService.generateBrandOriginNotificationTemplate(
-        context.project,
-        documentResult,
-        context.emailThread
-      );
+    // TODO: Create generateBudgetTimelineNotificationTemplate and generateBudgetTimelineVariantNotificationTemplate in emailTemplateService.js
+    const emailTemplate = (() => {
+      switch (documentType) {
+        case "BRAND_ORIGIN":
+          return EmailTemplateService.generateBrandOriginNotificationTemplate(
+            context.project,
+            documentResult,
+            context.emailThread
+          );
+        case "BUDGET_TIMELINE":
+          return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
+            context.project,
+            documentResult,
+            context.emailThread
+          );
+        default:
+          return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
+            context.project,
+            documentResult,
+            context.emailThread
+          );
+      }
+    })();
 
     await brevoIntegration.sendTransactionalEmail({
-      to: [pmUser.email],
+      to:
+        appConfig.server.nodeEnv === "production"
+          ? [pmUser.email, appConfig.server.adminEmail]
+          : [pmUser.email],
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
-      // Don't use reply-to for internal PM notifications
+      // Don't use reply-to for internal notifications
     });
 
     // Log the email in database
@@ -935,7 +961,7 @@ async function sendPMNotificationEmail(context, documentResult, correlationId) {
         pmEmail: pmUser.email,
         correlationId,
       },
-      "PM notification email sent successfully"
+      "PM/Admin notification email sent successfully"
     );
   } catch (error) {
     logger.error(
@@ -946,7 +972,7 @@ async function sendPMNotificationEmail(context, documentResult, correlationId) {
         correlationId,
         stack: error.stack,
       },
-      "Failed to send PM notification email"
+      "Failed to send PM/Admin notification email"
     );
 
     // Create audit log for email notification failure
@@ -955,12 +981,12 @@ async function sendPMNotificationEmail(context, documentResult, correlationId) {
         data: {
           projectId: context.project.id,
           actor: "SYSTEM (Brand Origin Generator)",
-          action: "PM_NOTIFICATION_FAILED",
+          action: "PM_ADMIN_NOTIFICATION_FAILED",
           details: {
             error: error.message,
             errorType: error.constructor.name,
             correlationId,
-            stage: "brand_origin_email_notification",
+            stage: `${documentType.toLowerCase()}_email_notification`,
           },
           at: new Date(),
         },
