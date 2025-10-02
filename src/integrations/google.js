@@ -150,11 +150,7 @@ class GoogleIntegration {
   // Create a new Google Doc
   async createDocument(title, content, options = {}) {
     const startTime = Date.now();
-    const {
-      folderId = null,
-      shareWithTeam = true,
-      makePublicReadable = false,
-    } = options;
+    const { folderId = null, makePublicReadable = false } = options;
 
     try {
       // Verify authentication first
@@ -293,20 +289,18 @@ class GoogleIntegration {
             }
           }
 
-          // Share with team if requested
-          if (shareWithTeam) {
-            try {
-              await this.shareDocumentWithTeam(documentId);
-            } catch (shareError) {
-              // Log warning but don't fail the creation
-              logger.warn(
-                {
-                  documentId,
-                  error: shareError.message,
-                },
-                "Failed to share document with team, but document created successfully"
-              );
-            }
+          // Share with admin always
+          try {
+            await this.shareDocumentWithAdmin(documentId);
+          } catch (shareError) {
+            // Log warning but don't fail the creation
+            logger.warn(
+              {
+                documentId,
+                error: shareError.message,
+              },
+              "Failed to share document with admin, but document created successfully"
+            );
           }
 
           // Make publicly readable if requested
@@ -432,7 +426,7 @@ class GoogleIntegration {
    * @private
    */
   // TODO: Also make this a new  method shareDocument so we can pass array of email and roles to share with
-  async shareDocumentWithTeam(documentId) {
+  async shareDocumentWithAdmin(documentId) {
     try {
       // Share with admin email if configured
       if (appConfig.server.adminEmail) {
@@ -445,13 +439,6 @@ class GoogleIntegration {
           },
           sendNotificationEmail: false,
         });
-        // TODO: Remove this after testing
-        await this.shareDocument(
-          documentId,
-          "okohfavour91@gmail.com",
-          "writer"
-        );
-
         logger.info(
           {
             documentId,
