@@ -381,6 +381,50 @@ class FormSubmissionService {
   }
 
   /**
+   * Enqueue brand origin document generation job
+   * @param {number} projectId - Project ID
+   * @param {string} correlationId - Correlation ID for tracking
+   * @returns {Promise<void>}
+   * @private
+   */
+  static async enqueueBrandOriginGeneration(projectId, correlationId) {
+    try {
+      const { QueueService } = require("@/queues");
+
+      const jobData = {
+        projectId,
+        correlationId,
+        timestamp: new Date().toISOString(),
+      };
+
+      const job = await QueueService.addBrandOriginGenerationJob(jobData, 1); // High priority
+
+      logger.info(
+        {
+          jobId: job.id,
+          projectId,
+          correlationId,
+        },
+        "Brand origin generation job enqueued successfully"
+      );
+
+      return job;
+    } catch (error) {
+      logger.error(
+        {
+          projectId,
+          correlationId,
+          error: error.message,
+        },
+        "Failed to enqueue brand origin generation job"
+      );
+      // Don't throw error - this shouldn't fail the main request
+      // The document can be generated manually later if needed
+      // TODO: We should find way to retry here.
+    }
+  }
+
+  /**
    * Send PM notification email for new questionnaire submissions
    * @param {Object} client - Client data
    * @param {Object} project - Project data
@@ -392,22 +436,26 @@ class FormSubmissionService {
   static async sendPMNotification(client, project, emailThread, correlationId) {
     try {
       // Get PM email address
-      const pmMember = await AsanaPendingProjectsService.getPMUser();
+      const pmMember = await AsanaPendingProjectsService.getPMUser(project?.id);
 
       if (!pmMember || !pmMember.email) {
         logger.warn("No PM email found for notification");
         return;
       }
-
+      const { appConfig } = require("@/config");
       // Generate email template using EmailTemplateService
-      const template = EmailTemplateService.generatePMNotificationTemplate(
-        client,
-        project,
-        emailThread
-      );
+      const template =
+        EmailTemplateService.generateQuestionnaireSubmissionNotificationTemplate(
+          client,
+          project,
+          emailThread
+        );
 
       await brevoIntegration.sendTransactionalEmail({
-        to: [pmMember.email],
+        to:
+          appConfig.server.nodeEnv === "production"
+            ? [pmMember.email, appConfig.server.adminEmail]
+            : [pmMember.email],
         subject: template.subject,
         htmlContent: template.htmlContent,
         // replyTo: emailThread.replyToAddress,
@@ -483,12 +531,17 @@ class FormSubmissionService {
         asanaTaskGid: asanaResult.asanaTaskGid,
       });
 
-      // TODO: Start immediate background cron job for creating brand origin document.
+      // Step 3: Start immediate background job for creating brand origin document
+      await this.enqueueBrandOriginGeneration(
+        processedData.project.id,
+        correlationId
+      );
 
       return {
         success: true,
         asanaTaskGid: asanaResult.asanaTaskGid,
         pendingProjectGid: asanaResult.pendingProjectGid,
+        brandOriginJobEnqueued: true,
       };
     } catch (error) {
       logger.error({

@@ -16,6 +16,7 @@ const CONFIG_KEYS = {
   ASANA_WORKSPACE_CONFIG: "asana_workspace_config", // not in use - we have this in env
   BREVO_SETTINGS: "brevo_settings", // not in use now
   DOCUMENT_TEMPLATES: "document_templates",
+  GOOGLE_DOCUMENTS_FOLDER: "google_documents_folder",
 };
 
 /**
@@ -77,6 +78,26 @@ const validateConfigValue = (key, value) => {
       if (!value.workspaceGid || typeof value.workspaceGid !== "string") {
         throw new ValidationError(
           "workspaceGid is required and must be a string"
+        );
+      }
+      break;
+
+    case CONFIG_KEYS.GOOGLE_DOCUMENTS_FOLDER:
+      if (!value.folderId || typeof value.folderId !== "string") {
+        throw new ValidationError("folderId is required and must be a string");
+      }
+      if (!value.folderName || typeof value.folderName !== "string") {
+        throw new ValidationError(
+          "folderName is required and must be a string"
+        );
+      }
+      if (
+        value.lastVerified &&
+        !(value.lastVerified instanceof Date) &&
+        typeof value.lastVerified !== "string"
+      ) {
+        throw new ValidationError(
+          "lastVerified must be a Date object or ISO string if provided"
         );
       }
       break;

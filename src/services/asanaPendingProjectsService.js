@@ -619,13 +619,56 @@ class AsanaPendingProjectsService {
 
   /**
    * Helper function to get PM user GID (configured based on team setup)
-   * @returns {Promise<Object|null>} PM user data or null if not found
+   * Attempts to find the appropriate Project Manager in the following order:
+   * 1. If projectId provided, looks up PM from project's asanaLink record
+   * 2. Searches for a lead Project Manager in TeamMembers
+   * 3. Falls back to any active Project Manager if no lead found
+   *
+   * @param {number} [projectId] - Optional project ID to look up assigned PM
+   * @returns {Promise<Object|null>} PM user data containing:
+   *   - id {number} - TeamMember ID
+   *   - name {string} - PM's name
+   *   - email {string} - PM's email
+   *   - asanaUserGid {string} - PM's Asana user GID
+   *   - roles {Array<{role: string, isLead: boolean}>} - PM's roles
+   *   - isActive {boolean} - Whether PM is active
+   *   - createdAt {Date} - When PM was created
+   * @returns {null} If no active PM found or error occurs
    */
-  static async getPMUser() {
+  static async getPMUser(projectId) {
     const prisma = getPrismaClient();
 
     try {
-      // First try to find a lead project manager
+      // If projectId provided, first try to get PM from asana links
+      if (projectId != null) {
+        const asanaLink = await prisma.asanaLink.findFirst({
+          where: {
+            projectId: projectId,
+            pmGid: {
+              not: null,
+            },
+          },
+          select: {
+            pmGid: true,
+          },
+        });
+
+        // If PM GID found in asana links, try to match team member
+        if (asanaLink?.pmGid) {
+          const pmMember = await prisma.teamMember.findFirst({
+            where: {
+              isActive: true,
+              asanaUserGid: asanaLink.pmGid,
+            },
+          });
+
+          if (pmMember) {
+            return pmMember;
+          }
+        }
+      }
+
+      // Fallback: Find lead project manager from team members
       let pmMember = await prisma.teamMember.findFirst({
         where: {
           isActive: true,
@@ -703,19 +746,29 @@ class AsanaPendingProjectsService {
 
       // Step 3: Create task in "Filled Questionnaire" section
       const taskName = `${client.name} - ${project.name}`;
+      const submissionDate = new Date();
+      const formattedDate = submissionDate.toLocaleString("en-NG", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZoneName: "short",
+      });
       const taskNotes = `New questionnaire submission received.
 
-**Client Details:**
+*Client Details:*
 - Company: ${client.name}
 - Email: ${client.primaryEmail}
 - Project: ${project.name}
 
-**Form Details:**
+*Form Details:*
 - Form ID: ${processedData.questionnaireResponse?.formId || "N/A"}
 - Response ID: ${processedData.questionnaireResponse?.responseId || "N/A"}
-- Submitted: ${new Date().toISOString()}
+- Submitted: ${formattedDate}
 
-**Next Steps:**
+*Next Steps:*
 - Review questionnaire responses
 - Review brand origin document when ready
 

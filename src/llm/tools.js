@@ -349,28 +349,29 @@ const postAsanaCommentTool = tool({
   description: "Post a comment to an Asana task with optional @mentions",
   parameters: z.object({
     taskGid: z.string().min(1),
-    text: z.string().min(1).max(2000),
-    mentionUserGids: z.array(z.string()).optional(),
+    htmlText: z.string().min(1).max(20000),
+    mentionUserGids: z
+      .array(
+        z.object({
+          gid: z.string(),
+          name: z.string(),
+        })
+      )
+      .optional(),
   }),
-  execute: async ({ taskGid, text, mentionUserGids }) => {
+  execute: async ({ taskGid, htmlText, mentionUserGids }) => {
     try {
-      let htmlText = text;
-
       // Add @mentions if provided
       if (mentionUserGids && mentionUserGids.length > 0) {
-        for (const userGid of mentionUserGids) {
+        for (const user of mentionUserGids) {
           htmlText = htmlText.replace(
-            new RegExp(`@${userGid}`, "g"),
-            `<a data-asana-gid="${userGid}">@user</a>`
+            new RegExp(`@${user.name}`, "g"),
+            `<a data-asana-gid="${user.gid}" data-asana-type="user">@${user.name}</a>`
           );
         }
       }
 
-      const comment = await asanaIntegration.addTaskComment(
-        taskGid,
-        text,
-        htmlText
-      );
+      const comment = await asanaIntegration.addTaskComment(taskGid, htmlText);
 
       logger.info(
         {

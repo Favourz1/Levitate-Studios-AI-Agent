@@ -1,7 +1,6 @@
-const { openai } = require("@ai-sdk/openai");
-const { anthropic } = require("@ai-sdk/anthropic");
-const { generateObject, generateText, tool } = require("ai");
-const { z } = require("zod");
+const { createOpenAI } = require("@ai-sdk/openai");
+const { createAnthropic } = require("@ai-sdk/anthropic");
+const { generateObject, generateText } = require("ai");
 const { appConfig } = require("@/config");
 const { LLMError } = require("@/utils/errors");
 const { createLogger, logLLMCall } = require("@/utils/logger");
@@ -11,31 +10,35 @@ const logger = createLogger("llm:client");
 
 // LLM Configuration
 const LLM_MODELS = {
-  // OpenAI models
-  OPENAI_GPT4: "gpt-4-turbo-preview",
-  OPENAI_GPT35: "gpt-3.5-turbo",
+  // OpenAI models - Only models that support structured output
   OPENAI_GPT4O: "gpt-4o",
+  OPENAI_GPT4_TURBO: "gpt-4-turbo-preview",
+  OPENAI_GPT35_TURBO: "gpt-3.5-turbo",
+  OPENAI_GPT4O_MINI: "gpt-4o-mini", // Supports structured output
+  OPENAI_GPT4_TURBO_2024: "gpt-4-turbo-2024-04-09", // Supports structured output
 
-  // Anthropic models (if available)
+  // Anthropic models
   ANTHROPIC_CLAUDE: "claude-3-sonnet-20240229",
   ANTHROPIC_CLAUDE_HAIKU: "claude-3-haiku-20240307",
 };
 
 // Model routing based on task complexity and cost
+// Note: Only use models that support structured output for generateObject calls
 const getModelForTask = (taskType) => {
   switch (taskType) {
     case "classification":
     case "extraction":
-      // Use smaller, faster models for simple tasks
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT35 };
-
-    case "generation":
-      // Use balanced model for content generation
+      // Use gpt-4o-mini for structured tasks (supports object generation)
       return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
 
+    case "generation":
+      // Use gpt-4-turbo for content generation
+      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
+    // return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4_TURBO };
+
     case "planning":
-      // Use most capable model for complex reasoning
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4 };
+      // Use gpt-4o-mini for planning with structured output
+      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
 
     default:
       return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
@@ -54,7 +57,9 @@ class LLMClient {
             new Error("OpenAI API key not configured")
           );
         }
-        return openai(appConfig.llm.openaiApiKey);
+        return createOpenAI({
+          apiKey: appConfig.llm.openaiApiKey,
+        });
       case "anthropic":
         if (!appConfig.llm.anthropicApiKey) {
           throw new LLMError(
@@ -63,7 +68,9 @@ class LLMClient {
             new Error("Anthropic API key not configured")
           );
         }
-        return anthropic(appConfig.llm.anthropicApiKey);
+        return createAnthropic({
+          apiKey: appConfig.llm.anthropicApiKey,
+        });
       default:
         throw new LLMError(
           "unknown",
@@ -74,6 +81,7 @@ class LLMClient {
   }
 
   // Generate structured data using schema validation
+  // schema parameter should be a z.ZodSchema
   async generateStructured(schema, prompt, context, taskType = "extraction") {
     const traceId = generateUuid();
     const startTime = Date.now();
@@ -81,51 +89,121 @@ class LLMClient {
 
     try {
       const llmProvider = this.getProvider(provider);
-
       const systemPrompt = this.buildSystemPrompt(taskType, context);
 
-      const result = await generateObject({
-        model: llmProvider(model),
-        schema,
-        system: systemPrompt,
-        prompt,
-        temperature: taskType === "generation" ? 0.7 : 0.1, // Higher temperature for creative tasks
-      });
+      // First, try with the preferred model
+      try {
+        const result = await generateObject({
+          model: llmProvider(model),
+          mode: "json",
+          schema,
+          system: systemPrompt,
+          prompt,
+          // output: "no-schema",
+          temperature: taskType === "generation" ? 0.7 : 0.1,
+        });
+        console.log("result generateObject", result?.object);
 
-      const duration = Date.now() - startTime;
+        const duration = Date.now() - startTime;
 
-      logLLMCall(
-        logger,
-        `${provider}:${model}`,
-        traceId,
-        result.usage?.totalTokens,
-        undefined
-      );
-
-      logger.info(
-        {
+        logLLMCall(
+          logger,
+          `${provider}:${model}`,
           traceId,
-          model: `${provider}:${model}`,
-          taskType,
-          duration,
-          promptLength: prompt.length,
-          success: true,
-          usage: result.usage,
-        },
-        "LLM structured generation completed"
-      );
+          result.usage?.totalTokens,
+          undefined
+        );
 
-      return {
-        data: result.object,
-        traceId,
-        tokenUsage: result.usage
-          ? {
-              promptTokens: result.usage.promptTokens,
-              completionTokens: result.usage.completionTokens,
-              totalTokens: result.usage.totalTokens,
-            }
-          : undefined,
-      };
+        logger.info(
+          {
+            traceId,
+            model: `${provider}:${model}`,
+            taskType,
+            duration,
+            promptLength: prompt.length,
+            success: true,
+            usage: result.usage,
+          },
+          "LLM structured generation completed"
+        );
+
+        return {
+          data: result.object,
+          traceId,
+          tokenUsage: result.usage
+            ? {
+                promptTokens: result.usage.promptTokens,
+                completionTokens: result.usage.completionTokens,
+                totalTokens: result.usage.totalTokens,
+              }
+            : undefined,
+        };
+      } catch (modelError) {
+        // If the model doesn't support object generation, try fallback approach
+        if (
+          modelError.message &&
+          modelError.message.includes("object generation mode")
+        ) {
+          logger.warn(
+            {
+              traceId,
+              model: `${provider}:${model}`,
+              error: modelError.message,
+            },
+            "Model doesn't support object generation, trying fallback model"
+          );
+
+          // Fallback to gpt-4o-mini which supports structured output
+          const fallbackModel = LLM_MODELS.OPENAI_GPT4O_MINI;
+          const fallbackResult = await generateObject({
+            model: llmProvider(fallbackModel),
+            mode: "json",
+            schema,
+            system: systemPrompt,
+            prompt,
+            // output: "no-schema",
+            temperature: taskType === "generation" ? 0.7 : 0.1,
+          });
+          console.log("fallbackResult generateObject", fallbackResult?.object);
+
+          const duration = Date.now() - startTime;
+
+          logLLMCall(
+            logger,
+            `${provider}:${fallbackModel}`,
+            traceId,
+            fallbackResult.usage?.totalTokens,
+            undefined
+          );
+
+          logger.info(
+            {
+              traceId,
+              model: `${provider}:${fallbackModel}`,
+              taskType,
+              duration,
+              promptLength: prompt.length,
+              success: true,
+              fallback: true,
+              usage: fallbackResult.usage,
+            },
+            "LLM structured generation completed with fallback model"
+          );
+
+          return {
+            data: fallbackResult.object,
+            traceId,
+            tokenUsage: fallbackResult.usage
+              ? {
+                  promptTokens: fallbackResult.usage.promptTokens,
+                  completionTokens: fallbackResult.usage.completionTokens,
+                  totalTokens: fallbackResult.usage.totalTokens,
+                }
+              : undefined,
+          };
+        }
+        throw modelError;
+      }
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error(
@@ -135,6 +213,7 @@ class LLMClient {
           taskType,
           duration,
           error: error.message,
+          originalError: error.message,
         },
         "LLM structured generation failed"
       );
@@ -228,18 +307,18 @@ class LLMClient {
   }
 
   // Generate with tool calling capabilities
-  async generateWithTools(prompt, tools, context, maxSteps = 5) {
+  async generateWithTools(prompt, tools, context) {
     const traceId = generateUuid();
     const startTime = Date.now();
     const { provider, model } = getModelForTask("planning");
 
     try {
-      const llmProvider = this.getProvider(provider);
-
-      const systemPrompt = this.buildSystemPromptForTools(context);
-
       // TODO: Implement tool calling with AI SDK
       // This is a placeholder - actual implementation would use the AI SDK's tool calling features
+      // eslint-disable-next-line no-unused-vars
+      const llmProvider = this.getProvider(provider);
+      // eslint-disable-next-line no-unused-vars
+      const systemPrompt = this.buildSystemPromptForTools(context);
 
       const duration = Date.now() - startTime;
 

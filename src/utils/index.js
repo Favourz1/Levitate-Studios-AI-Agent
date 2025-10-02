@@ -1,13 +1,7 @@
-// Export all from other utility modules
+// Import other utility modules
 const logger = require("@/utils/logger");
 const errors = require("@/utils/errors");
 const validation = require("@/utils/validation");
-
-module.exports = {
-  ...logger,
-  ...errors,
-  ...validation,
-};
 
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
@@ -215,7 +209,9 @@ const throttle = (func, limit) => {
 };
 
 module.exports = {
-  ...module.exports,
+  ...logger,
+  ...errors,
+  ...validation,
   generateUuid,
   generateDedupeKey,
   createActionToken,

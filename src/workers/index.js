@@ -1,4 +1,4 @@
-const { Worker } = require("bullmq");
+require("module-alias/register");
 const { redis, QUEUE_NAMES, createWorker } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { setupGlobalErrorHandlers } = require("@/middleware/errorHandler");
@@ -29,7 +29,7 @@ const startWorkers = async () => {
       {
         name: QUEUE_NAMES.DOC_GENERATION,
         processor: documentGenerationProcessor,
-        concurrency: 2, // Limit concurrent document generation
+        concurrency: 3, // Limit concurrent document generation
       },
       {
         name: QUEUE_NAMES.EMAIL_INTENT,
@@ -108,6 +108,7 @@ const startWorkers = async () => {
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   } catch (error) {
     logger.error("Failed to start workers:", error);
+    console.log(error);
     process.exit(1);
   }
 };
@@ -130,6 +131,7 @@ const stopWorkers = async () => {
 if (require.main === module) {
   startWorkers().catch((error) => {
     logger.error("Failed to start workers:", error);
+    console.log(error);
     process.exit(1);
   });
 }

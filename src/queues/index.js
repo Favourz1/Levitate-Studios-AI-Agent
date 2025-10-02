@@ -1,4 +1,4 @@
-const { Queue, Worker, Job } = require("bullmq");
+const { Queue, Worker } = require("bullmq");
 const IORedis = require("ioredis");
 const { appConfig } = require("@/config");
 const {
@@ -12,7 +12,8 @@ const logger = createLogger("queue");
 
 // Redis connection
 const redis = new IORedis(appConfig.redis.url, {
-  maxRetriesPerRequest: appConfig.redis.maxRetriesPerRequest,
+  maxRetriesPerRequest: null,
+  // maxRetriesPerRequest: appConfig.redis.maxRetriesPerRequest,
   retryDelayOnFailover: appConfig.redis.retryDelayOnFailover,
   lazyConnect: true,
 });
@@ -61,6 +62,28 @@ class QueueService {
     };
 
     return queues.docGeneration.add("generate-document", data, jobOptions);
+  }
+
+  // Brand origin document generation job with specific dedupe key
+  static async addBrandOriginGenerationJob(data, priority = 1) {
+    const dedupeKey = `project:${data.projectId}:brand_origin:generate`;
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority,
+      jobId: dedupeKey, // Ensure idempotency with dedupe key
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+      documentType: "BRAND_ORIGIN",
+    };
+
+    return queues.docGeneration.add(
+      "generate-brand-origin",
+      jobData,
+      jobOptions
+    );
   }
 
   // Email parsing jobs
@@ -193,7 +216,7 @@ const createWorker = (queueName, processor, concurrency = 1) => {
       connection: redis,
       concurrency,
       removeOnComplete: 10,
-      removeOnFail: 20,
+      removeOnFail: 30,
     }
   );
 

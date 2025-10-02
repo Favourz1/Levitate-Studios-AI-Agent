@@ -54,7 +54,7 @@ app.use(securityHeaders);
 
 // Special middleware for webhook routes - preserve raw body for ALL apps-script endpoints
 app.use(
-  "/api/webhooks/",
+  ["/api/webhooks/", "/api/v1/webhooks/"],
   express.raw({
     type: "application/json",
     limit: "50mb",
@@ -95,7 +95,7 @@ app.use("/api/v1", apiRouter);
 app.get(
   "/",
   asyncHandler(async (req, res) => {
-    res.redirect("/api/healthz");
+    res.redirect("/api/v1/healthz");
   })
 );
 

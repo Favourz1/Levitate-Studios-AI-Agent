@@ -501,9 +501,66 @@ class AsanaIntegration {
     }
   }
 
-  // Move task to section
+  /**
+   * Move a task to a specific section within a project
+   * @param {string} taskGid - The GID of the task to move (required)
+   * @param {string} projectGid - The GID of the project containing the task (required)
+   * @param {string} sectionGid - The GID of the target section (required)
+   * @returns {Promise<void>} Resolves when task is successfully moved
+   * @throws {AsanaError} When the operation fails or parameters are invalid
+   * @public
+   */
   async moveTaskToSection(taskGid, projectGid, sectionGid) {
     const startTime = Date.now();
+
+    // Validate required parameters
+    if (
+      !taskGid ||
+      typeof taskGid !== "string" ||
+      taskGid.trim().length === 0
+    ) {
+      throw new AsanaError(
+        "moveTaskToSection",
+        new Error("taskGid is required and must be a non-empty string"),
+        {
+          taskGid,
+          projectGid,
+          sectionGid,
+        }
+      );
+    }
+
+    if (
+      !projectGid ||
+      typeof projectGid !== "string" ||
+      projectGid.trim().length === 0
+    ) {
+      throw new AsanaError(
+        "moveTaskToSection",
+        new Error("projectGid is required and must be a non-empty string"),
+        {
+          taskGid,
+          projectGid,
+          sectionGid,
+        }
+      );
+    }
+
+    if (
+      !sectionGid ||
+      typeof sectionGid !== "string" ||
+      sectionGid.trim().length === 0
+    ) {
+      throw new AsanaError(
+        "moveTaskToSection",
+        new Error("sectionGid is required and must be a non-empty string"),
+        {
+          taskGid,
+          projectGid,
+          sectionGid,
+        }
+      );
+    }
 
     try {
       await retry(
@@ -513,12 +570,12 @@ class AsanaIntegration {
             const opts = {
               body: {
                 data: {
-                  task: taskGid,
+                  task: taskGid.trim(),
                 },
               },
             };
 
-            await this.sectionsApi.addTaskForSection(sectionGid, opts);
+            await this.sectionsApi.addTaskForSection(sectionGid.trim(), opts);
           });
         },
         3,
@@ -545,8 +602,17 @@ class AsanaIntegration {
     }
   }
 
-  // Add comment (story) to task
-  async addTaskComment(taskGid, text, htmlText) {
+  /**
+   * Add a comment (story) to an Asana task
+   * @param {string} taskGid - The GID of the task to comment on (required)
+   * @param {string} htmlText - HTML content for rich formatting (required).
+   * Must be wrapped in <body> tags. Only supports limited HTML tags:
+   * <a>, <ol>, <ul>, <li>, <strong>, <em>, <u>, <code>, <body>
+   * @returns {Promise<Object>} The created story object with gid, text, and created_at
+   * @throws {AsanaError} When the operation fails or parameters are invalid
+   * @public
+   */
+  async addTaskComment(taskGid, htmlText) {
     const startTime = Date.now();
 
     try {
@@ -556,7 +622,6 @@ class AsanaIntegration {
             // Prepare the request body according to Asana SDK v3.1.1 format
             const requestBody = {
               data: {
-                text,
                 html_text: htmlText,
               },
             };
@@ -578,7 +643,7 @@ class AsanaIntegration {
 
             return {
               gid: story.gid,
-              text: story.text || text,
+              text: story.text || requestBody.data.text,
               created_at: story.created_at || new Date().toISOString(),
             };
           });
@@ -601,7 +666,7 @@ class AsanaIntegration {
         duration,
         error
       );
-      throw new AsanaError("addTaskComment", error, { taskGid, text });
+      throw new AsanaError("addTaskComment", error, { taskGid, htmlText });
     }
   }
 
