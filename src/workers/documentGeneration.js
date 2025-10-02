@@ -487,6 +487,45 @@ async function createDocumentRecords(
       "Google Drive document created successfully"
     );
 
+    const pmUser = projectId
+      ? await AsanaPendingProjectsService.getPMUser(projectId)
+      : null;
+    console.log("pmUser from createDocumentRecords", pmUser);
+    // Share document with PM
+    if (pmUser) {
+      try {
+        await googleIntegration.shareDocument(googleDoc.id, [
+          {
+            email: pmUser.email,
+            role: "writer",
+            options: {
+              sendNotification: true,
+            },
+          },
+        ]);
+
+        logger.info(
+          {
+            projectId,
+            googleDocId: googleDoc.id,
+            pmEmail: pmUser.email,
+            correlationId,
+          },
+          "Google Document shared with PM successfully"
+        );
+      } catch (shareError) {
+        logger.warn(
+          {
+            projectId,
+            googleDocId: googleDoc.id,
+            error: shareError.message,
+            correlationId,
+          },
+          "Failed to share document with PM, but continuing"
+        );
+      }
+    }
+
     // Step 3: Quick database transaction to update with Google Drive info and create revision
     const finalResult = await withTransaction(async (tx) => {
       // Update document with Google Drive ID and move to PM_REVIEW status
