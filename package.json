@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "start": "node src/process-manager.js",
     "start:worker": "node src/workers/index.js",
     "dev:worker": "nodemon src/workers/index.js",
     "monitor": "node src/monitoring/queueMonitor.js",
@@ -14,7 +14,6 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:seed": "node src/database/seed.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src --ext .js",
