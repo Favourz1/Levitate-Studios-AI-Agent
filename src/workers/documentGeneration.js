@@ -22,6 +22,7 @@ const {
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
 const { appConfig } = require("@/config");
+const { DocumentType, DocumentStatus } = require("@/constants");
 
 /**
  * Brand Origin Document Generation Processor
@@ -65,7 +66,12 @@ const brandOriginGenerationProcessor = async (job) => {
     await updateAsanaWorkflow(context, documentResult, correlationId);
 
     // Step 5: Send PM notification email
-    await sendPMAdminNotificationEmail(context, documentResult, correlationId);
+    await sendPMAdminNotificationEmail(
+      context,
+      documentResult,
+      DocumentType.BRAND_ORIGIN,
+      correlationId
+    );
 
     const duration = Date.now() - startTime;
 
@@ -425,7 +431,7 @@ async function createDocumentRecords(
       const document = await tx.document.create({
         data: {
           projectId,
-          type: "BRAND_ORIGIN",
+          type: DocumentType.BRAND_ORIGIN,
           status: "DRAFT", // Initially in draft until Google Doc is created
           driveFileId: null, // Will be updated after Google Doc creation
           isVariant: false,
@@ -490,7 +496,6 @@ async function createDocumentRecords(
     const pmUser = projectId
       ? await AsanaPendingProjectsService.getPMUser(projectId)
       : null;
-    console.log("pmUser from createDocumentRecords", pmUser);
     // Share document with PM
     if (pmUser) {
       try {
@@ -533,7 +538,7 @@ async function createDocumentRecords(
         where: { id: documentRecord.document.id },
         data: {
           driveFileId: googleDoc.id,
-          status: "PM_REVIEW", // Ready for PM review now that Google Doc exists
+          status: DocumentStatus.PM_REVIEW, // Ready for PM review now that Google Doc exists
           updatedAt: new Date(),
         },
       });
@@ -942,20 +947,26 @@ async function sendPMAdminNotificationEmail(
     // TODO: Create generateBudgetTimelineNotificationTemplate and generateBudgetTimelineVariantNotificationTemplate in emailTemplateService.js
     const emailTemplate = (() => {
       switch (documentType) {
-        case "BRAND_ORIGIN":
+        case DocumentType.BRAND_ORIGIN:
           return EmailTemplateService.generateBrandOriginNotificationTemplate(
             context.project,
             documentResult,
             context.emailThread
           );
-        case "BUDGET_TIMELINE":
+        case DocumentType.BUDGET_TIMELINE:
           return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
             context.project,
             documentResult,
             context.emailThread
           );
-        default:
+        case DocumentType.BUDGET_TIMELINE_VARIANT:
           return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
+            context.project,
+            documentResult,
+            context.emailThread
+          );
+        default:
+          return EmailTemplateService.generateBrandOriginNotificationTemplate(
             context.project,
             documentResult,
             context.emailThread
@@ -1109,7 +1120,7 @@ const documentGenerationProcessor = async (job) => {
   );
 
   switch (documentType) {
-    case "BRAND_ORIGIN":
+    case DocumentType.BRAND_ORIGIN:
       return await brandOriginGenerationProcessor(job);
 
     default:
