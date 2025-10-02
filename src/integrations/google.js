@@ -790,73 +790,220 @@ class GoogleIntegration {
   }
 
   // Share document with specific permissions
-  async shareDocument(documentId, email, role = "reader", options = {}) {
+  async shareDocument(documentId, recipients) {
     const startTime = Date.now();
-    const { sendNotification = false, expirationTime = null } = options;
 
     try {
       // Verify authentication first
       await this.verifyAuthentication();
 
-      // Validate inputs
+      // Validate document ID
       if (!documentId || typeof documentId !== "string") {
         throw new Error("Document ID is required and must be a string");
       }
 
-      if (!email || typeof email !== "string" || !email.includes("@")) {
-        throw new Error("Valid email address is required");
+      // Validate recipients array
+      if (!Array.isArray(recipients) || recipients.length === 0) {
+        throw new Error("Recipients must be a non-empty array");
       }
 
       const validRoles = ["reader", "commenter", "writer", "owner"];
-      if (!validRoles.includes(role)) {
-        throw new Error(
-          `Invalid role. Must be one of: ${validRoles.join(", ")}`
-        );
-      }
+      const validatedRecipients = [];
+      const skippedRecipients = [];
 
-      await retry(
-        async () => {
-          const permissionRequest = {
-            fileId: documentId,
-            requestBody: {
-              role,
-              type: "user",
-              emailAddress: email,
-            },
-            sendNotificationEmail: sendNotification,
-          };
+      // Validate each recipient
+      for (let i = 0; i < recipients.length; i++) {
+        const recipient = recipients[i];
 
-          // Add expiration time if specified
-          if (expirationTime) {
-            permissionRequest.requestBody.expirationTime = expirationTime;
+        try {
+          // Validate recipient object structure
+          if (!recipient || typeof recipient !== "object") {
+            throw new Error("Recipient must be an object");
           }
 
-          const result = await this.drive.permissions.create(permissionRequest);
+          // Validate email
+          if (
+            !recipient.email ||
+            typeof recipient.email !== "string" ||
+            !recipient.email.includes("@")
+          ) {
+            throw new Error("Valid email address is required");
+          }
 
-          logger.info(
+          // Validate role (default to "reader" if not provided)
+          const role = recipient.role || "reader";
+          if (!validRoles.includes(role)) {
+            throw new Error(
+              `Invalid role. Must be one of: ${validRoles.join(", ")}`
+            );
+          }
+
+          // Validate options (default to empty object if not provided)
+          const options = recipient.options || {};
+          if (typeof options !== "object") {
+            throw new Error("Options must be an object");
+          }
+
+          // Extract and validate options
+          const { sendNotification = false, expirationTime = null } = options;
+
+          if (typeof sendNotification !== "boolean") {
+            throw new Error("sendNotification must be a boolean");
+          }
+
+          if (expirationTime !== null && typeof expirationTime !== "string") {
+            throw new Error("expirationTime must be a string or null");
+          }
+
+          // Add to validated recipients
+          validatedRecipients.push({
+            email: recipient.email.trim().toLowerCase(),
+            role,
+            options: { sendNotification, expirationTime },
+          });
+        } catch (validationError) {
+          // Log warning and skip invalid recipient
+          logger.warn(
             {
               documentId,
-              email,
-              role,
-              permissionId: result.data.id,
+              recipientIndex: i,
+              recipient: recipient,
+              error: validationError.message,
             },
-            "Document shared successfully"
+            "Skipping invalid recipient during document sharing"
           );
 
-          return result;
+          skippedRecipients.push({
+            index: i,
+            recipient,
+            error: validationError.message,
+          });
+        }
+      }
+
+      // Check if we have any valid recipients after validation
+      if (validatedRecipients.length === 0) {
+        throw new Error("No valid recipients found after validation");
+      }
+
+      // Log validation summary
+      logger.info(
+        {
+          documentId,
+          totalRecipients: recipients.length,
+          validRecipients: validatedRecipients.length,
+          skippedRecipients: skippedRecipients.length,
         },
-        3,
-        1000
+        "Recipient validation completed"
       );
 
+      // Share document with each valid recipient
+      const shareResults = [];
+      const shareErrors = [];
+
+      for (const recipient of validatedRecipients) {
+        try {
+          await retry(
+            async () => {
+              const permissionRequest = {
+                fileId: documentId,
+                requestBody: {
+                  role: recipient.role,
+                  type: "user",
+                  emailAddress: recipient.email,
+                },
+                sendNotificationEmail: recipient.options.sendNotification,
+              };
+
+              // Add expiration time if specified
+              if (recipient.options.expirationTime) {
+                permissionRequest.requestBody.expirationTime =
+                  recipient.options.expirationTime;
+              }
+
+              const result = await this.drive.permissions.create(
+                permissionRequest
+              );
+
+              logger.info(
+                {
+                  documentId,
+                  email: recipient.email,
+                  role: recipient.role,
+                  permissionId: result.data.id,
+                },
+                "Document shared successfully with recipient"
+              );
+
+              shareResults.push({
+                email: recipient.email,
+                role: recipient.role,
+                permissionId: result.data.id,
+                success: true,
+              });
+
+              return result;
+            },
+            3,
+            1000
+          );
+        } catch (shareError) {
+          // Log error but continue with other recipients
+          logger.error(
+            {
+              documentId,
+              email: recipient.email,
+              role: recipient.role,
+              error: shareError.message,
+              code: shareError.code,
+            },
+            "Failed to share document with recipient"
+          );
+
+          shareErrors.push({
+            email: recipient.email,
+            role: recipient.role,
+            error: shareError.message,
+            code: shareError.code,
+          });
+        }
+      }
+
       const duration = Date.now() - startTime;
+
+      // Determine overall success - at least one recipient must succeed
+      const overallSuccess = shareResults.length > 0;
+
       logIntegrationCall(
         logger,
         "Google Drive",
         "shareDocument",
-        true,
+        overallSuccess,
         duration
       );
+
+      // Log final summary
+      logger.info(
+        {
+          documentId,
+          totalRecipients: recipients.length,
+          successfulShares: shareResults.length,
+          failedShares: shareErrors.length,
+          skippedRecipients: skippedRecipients.length,
+          duration,
+        },
+        "Document sharing operation completed"
+      );
+
+      // Return comprehensive results
+      return {
+        documentId,
+        totalRecipients: recipients.length,
+        successfulShares: shareResults,
+        failedShares: shareErrors,
+        skippedRecipients,
+        overallSuccess,
+      };
     } catch (error) {
       const duration = Date.now() - startTime;
       logIntegrationCall(
@@ -879,8 +1026,7 @@ class GoogleIntegration {
 
       throw new GoogleError("shareDocument", new Error(enhancedMessage), {
         documentId,
-        email,
-        role,
+        recipients,
         originalError: error.message,
         code: error.code,
       });
@@ -1464,16 +1610,27 @@ class GoogleIntegration {
         // Share with admin if configured
         if (appConfig.server.adminEmail) {
           try {
-            await this.shareDocument(
-              folder.id,
-              appConfig.server.adminEmail,
-              "writer"
-            );
-            // TODO: Remove this after testing
-            await this.shareDocument(
-              folder.id,
-              "okohfavour91@gmail.com",
-              "writer"
+            const recipients = [
+              {
+                email: appConfig.server.adminEmail,
+                role: "writer",
+              },
+              // TODO: Remove this after testing
+              {
+                email: "okohfavour91@gmail.com",
+                role: "writer",
+              },
+            ];
+
+            const shareResult = await this.shareDocument(folder.id, recipients);
+
+            logger.info(
+              {
+                folderId: folder.id,
+                successfulShares: shareResult.successfulShares.length,
+                failedShares: shareResult.failedShares.length,
+              },
+              "Documents folder sharing completed"
             );
           } catch (shareError) {
             logger.warn(
