@@ -422,10 +422,709 @@ class GoogleIntegration {
   }
 
   /**
-   * Share document with team members
+   * Create a formatted Google Doc using the Docs batchUpdate API with advanced formatting capabilities
+   * This method provides comprehensive document creation with styling, sharing, and error handling
+   *
+   * @param {string} title - Document title
+   * @param {Array} blocks - Array of content blocks describing what to insert
+   *   Supported block types:
+   *     { type: 'heading', text, level, style?: {bold, italic, fontSize, color} }
+   *     { type: 'paragraph', text, style?: {bold, italic, fontSize, color, alignment} }
+   *     { type: 'styled', text, style: {bold, italic, underline, fontSize, foregroundColor: {red,green,blue}} }
+   *     { type: 'link', text, url }
+   *     { type: 'table', rows: [[cellText,...],[...]], style?: {borderWidth, backgroundColor} }
+   *     { type: 'bullets', items: ['one','two'], style?: {bulletPreset} }
+   *     { type: 'numbered', items: [...], style?: {bulletPreset} }
+   *     { type: 'image', url, width?, height? }
+   *     { type: 'spacer', height? } // adds vertical spacing
+   * @param {Object} options - Configuration options
+   *   { folderId?, makePublicReadable?, shareWithEmails? }
+   * @returns {Promise<Object>} Document creation result with metadata
+   */
+  async createFormattedDocument(title, blocks = [], options = {}) {
+    const startTime = Date.now();
+    const {
+      folderId = null,
+      makePublicReadable = false,
+      shareWithEmails = [],
+    } = options;
+
+    try {
+      // Verify authentication first
+      await this.verifyAuthentication();
+
+      const result = await retry(
+        async () => {
+          // Validate inputs
+          if (
+            !title ||
+            typeof title !== "string" ||
+            title.trim().length === 0
+          ) {
+            throw new Error(
+              "Document title is required and must be a non-empty string"
+            );
+          }
+
+          if (!Array.isArray(blocks)) {
+            throw new Error("Blocks must be an array");
+          }
+
+          // Sanitize title (remove invalid characters for Google Docs)
+          const sanitizedTitle = title.replace(/[<>:"/\\|?*]/g, "_").trim();
+
+          logger.info(
+            {
+              title: sanitizedTitle,
+              blocksCount: blocks.length,
+              folderId,
+              makePublicReadable,
+              shareWithEmailsCount: shareWithEmails.length,
+            },
+            "Creating formatted Google Document"
+          );
+
+          // Step 1: Create the document
+          const createRequest = {
+            requestBody: {
+              title: sanitizedTitle,
+            },
+          };
+
+          const doc = await this.docs.documents.create(createRequest);
+
+          if (!doc.data || !doc.data.documentId) {
+            throw new Error(
+              "Failed to create document - no document ID returned"
+            );
+          }
+
+          const documentId = doc.data.documentId;
+
+          logger.info(
+            {
+              documentId,
+              title: sanitizedTitle,
+            },
+            "Google Document created successfully"
+          );
+
+          // Step 2: Process blocks and create formatted content
+          if (blocks.length > 0) {
+            await this.processDocumentBlocks(documentId, blocks);
+          }
+
+          // Step 3: Move to folder if specified
+          if (folderId) {
+            try {
+              await this.drive.files.update({
+                fileId: documentId,
+                addParents: folderId,
+                fields: "id,parents",
+              });
+
+              logger.info(
+                {
+                  documentId,
+                  folderId,
+                },
+                "Document moved to folder"
+              );
+            } catch (folderError) {
+              // Log warning but don't fail - document was created successfully
+              logger.warn(
+                {
+                  documentId,
+                  folderId,
+                  error: folderError.message,
+                },
+                "Failed to move document to folder, but document created successfully"
+              );
+            }
+          }
+
+          // Step 4: Share with admin always
+
+          try {
+            await this.shareDocumentWithAdmin(documentId);
+          } catch (shareError) {
+            // Log warning but don't fail the creation
+            logger.warn(
+              {
+                documentId,
+                error: shareError.message,
+              },
+              "Failed to share document with admin, but document created successfully"
+            );
+          }
+
+          // Step 5: Share with additional emails if provided
+          if (shareWithEmails.length > 0) {
+            try {
+              const recipients = shareWithEmails.map((email) => ({
+                email: typeof email === "string" ? email : email.email,
+                role:
+                  typeof email === "string" ? "reader" : email.role || "reader",
+                options: typeof email === "string" ? {} : email.options || {},
+              }));
+
+              await this.shareDocument(documentId, recipients);
+            } catch (shareError) {
+              // Log warning but don't fail the creation
+              logger.warn(
+                {
+                  documentId,
+                  error: shareError.message,
+                },
+                "Failed to share document with additional emails, but document created successfully"
+              );
+            }
+          }
+
+          // Step 6: Make publicly readable if requested
+          if (makePublicReadable) {
+            try {
+              await this.makeDocumentPublicReadable(documentId);
+            } catch (publicError) {
+              // Log warning but don't fail the creation
+              logger.warn(
+                {
+                  documentId,
+                  error: publicError.message,
+                },
+                "Failed to make document public, but document created successfully"
+              );
+            }
+          }
+
+          // Step 7: Get file metadata
+          let file;
+          try {
+            file = await this.drive.files.get({
+              fileId: documentId,
+              fields:
+                "id,name,webViewLink,webContentLink,exportLinks,parents,createdTime,modifiedTime",
+            });
+          } catch (metadataError) {
+            logger.error(
+              {
+                documentId,
+                error: metadataError.message,
+              },
+              "Failed to get document metadata"
+            );
+            throw new Error(
+              `Failed to get document metadata: ${metadataError.message}`
+            );
+          }
+
+          if (!file.data) {
+            throw new Error("No file metadata returned");
+          }
+
+          return {
+            id: file.data.id,
+            name: file.data.name,
+            webViewLink: file.data.webViewLink,
+            webContentLink: file.data.webContentLink,
+            exportLinks: file.data.exportLinks,
+            parents: file.data.parents,
+            createdTime: file.data.createdTime,
+            modifiedTime: file.data.modifiedTime,
+          };
+        },
+        3, // max attempts
+        2000 // base delay
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "createFormattedDocument",
+        true,
+        duration
+      );
+
+      logger.info(
+        {
+          documentId: result.id,
+          title: result.name,
+          duration,
+        },
+        "Formatted document creation completed successfully"
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "createFormattedDocument",
+        false,
+        duration,
+        error
+      );
+
+      logger.error(
+        {
+          title,
+          error: error.message,
+          duration,
+        },
+        "Formatted document creation failed"
+      );
+
+      // Enhance error message based on error type
+      let enhancedMessage = error.message;
+      if (error.code === 403) {
+        enhancedMessage = `Permission denied: Service account '${appConfig.google.clientEmail}' lacks permission to create documents. Ensure the service account has Editor role and APIs are enabled.`;
+      } else if (error.code === 401) {
+        enhancedMessage =
+          "Authentication failed: Invalid service account credentials. Check GOOGLE_PRIVATE_KEY and GOOGLE_CLIENT_EMAIL.";
+      } else if (error.code === 429) {
+        enhancedMessage =
+          "Rate limit exceeded: Too many requests to Google API. Retry after delay.";
+      }
+
+      throw new GoogleError(
+        "createFormattedDocument",
+        new Error(enhancedMessage),
+        {
+          title,
+          originalError: error.message,
+          code: error.code,
+          serviceAccount: appConfig.google.clientEmail,
+        }
+      );
+    }
+  }
+
+  /**
+   * Process document blocks and apply formatting using batchUpdate
+   * Uses a simplified approach that inserts content at the end of the document
    * @private
    */
-  // TODO: Also make this a new  method shareDocument so we can pass array of email and roles to share with
+  async processDocumentBlocks(documentId, blocks) {
+    try {
+      // Get current document to find the end index
+      const doc = await this.docs.documents.get({ documentId });
+      let currentIndex =
+        doc.data.body.content[doc.data.body.content.length - 1].endIndex - 1;
+
+      // Process blocks sequentially to avoid index conflicts
+      for (const block of blocks) {
+        if (!block || !block.type) {
+          logger.warn({ block }, "Skipping invalid block");
+          continue;
+        }
+
+        const insertedLength = await this.processBlock(
+          documentId,
+          block,
+          currentIndex
+        );
+        currentIndex += insertedLength;
+      }
+
+      logger.info(
+        {
+          documentId,
+          blocksProcessed: blocks.length,
+        },
+        "All blocks processed successfully"
+      );
+    } catch (error) {
+      logger.error(
+        {
+          documentId,
+          error: error.message,
+          blocksCount: blocks.length,
+        },
+        "Failed to process document blocks"
+      );
+      throw new Error(`Failed to process document blocks: ${error.message}`);
+    }
+  }
+
+  /**
+   * Process a single block and return the length of content inserted
+   * @private
+   */
+  async processBlock(documentId, block, startIndex) {
+    const requests = [];
+    let insertedLength = 0;
+
+    switch (block.type) {
+      case "image":
+        if (block.url || block.fileId) {
+          try {
+            let imageUrl = block.url;
+
+            // If fileId is provided, try to get webContentLink from Google Drive
+            if (block.fileId) {
+              try {
+                const file = await this.drive.files.get({
+                  fileId: block.fileId,
+                  fields: "webContentLink,webViewLink,exportLinks",
+                });
+
+                // Use webContentLink if available, otherwise fall back to webViewLink
+                if (file.data.webContentLink) {
+                  imageUrl = file.data.webContentLink;
+                  logger.info(
+                    {
+                      fileId: block.fileId,
+                      webContentLink: imageUrl,
+                    },
+                    "Successfully retrieved webContentLink for image"
+                  );
+                } else if (file.data.webViewLink) {
+                  imageUrl = file.data.webViewLink;
+                  logger.info(
+                    {
+                      fileId: block.fileId,
+                      webViewLink: imageUrl,
+                    },
+                    "Using webViewLink as fallback for image"
+                  );
+                } else {
+                  throw new Error("No accessible link found for image file");
+                }
+              } catch (fileError) {
+                logger.warn(
+                  {
+                    fileId: block.fileId,
+                    error: fileError.message,
+                  },
+                  "Failed to get webContentLink for image file, skipping image"
+                );
+
+                // Skip image insertion but add a text placeholder
+                requests.push({
+                  insertText: {
+                    location: { index: startIndex },
+                    text: "[Image placeholder - could not load image]\n",
+                  },
+                });
+
+                insertedLength = "[Image placeholder - could not load image]\n"
+                  .length;
+                break;
+              }
+            }
+
+            const width = block.width || 300;
+            const height = block.height || null;
+
+            const imageRequest = {
+              insertInlineImage: {
+                location: { index: startIndex },
+                uri: imageUrl,
+                objectSize: {
+                  width: { magnitude: width, unit: "PT" },
+                },
+              },
+            };
+
+            if (height) {
+              imageRequest.insertInlineImage.objectSize.height = {
+                magnitude: height,
+                unit: "PT",
+              };
+            }
+
+            requests.push(imageRequest);
+
+            // Add spacing after image
+            requests.push({
+              insertText: {
+                location: { index: startIndex + 1 },
+                text: "\n",
+              },
+            });
+
+            insertedLength = 2; // Image + newline
+          } catch (imageError) {
+            logger.warn(
+              {
+                documentId,
+                imageUrl: block.url,
+                fileId: block.fileId,
+                error: imageError.message,
+              },
+              "Failed to process image block, skipping image and adding text placeholder"
+            );
+
+            // Skip image insertion but add a text placeholder
+            requests.push({
+              insertText: {
+                location: { index: startIndex },
+                text: "[Image placeholder - could not load image]\n",
+              },
+            });
+
+            insertedLength = "[Image placeholder - could not load image]\n"
+              .length;
+          }
+        }
+        break;
+
+      case "table":
+        if (block.rows && Array.isArray(block.rows) && block.rows.length > 0) {
+          const rows = block.rows.length;
+          const cols = Math.max(
+            ...block.rows.map((row) => (Array.isArray(row) ? row.length : 0))
+          );
+
+          if (cols > 0) {
+            requests.push({
+              insertTable: {
+                rows,
+                columns: cols,
+                location: { index: startIndex },
+              },
+            });
+
+            // Add spacing after table
+            requests.push({
+              insertText: {
+                location: { index: startIndex + 1 },
+                text: "\n",
+              },
+            });
+
+            insertedLength = rows * cols + 1; // Rough estimate
+          }
+        }
+        break;
+
+      case "heading":
+        if (block.text) {
+          const text = `${block.text}\n`;
+          requests.push({
+            insertText: {
+              location: { index: startIndex },
+              text: text,
+            },
+          });
+
+          // Apply heading style
+          requests.push({
+            updateParagraphStyle: {
+              range: {
+                startIndex: startIndex,
+                endIndex: startIndex + block.text.length,
+              },
+              paragraphStyle: {
+                namedStyleType: `HEADING_${Math.min(
+                  Math.max(block.level || 1, 1),
+                  6
+                )}`,
+              },
+              fields: "namedStyleType",
+            },
+          });
+
+          insertedLength = text.length;
+        }
+        break;
+
+      case "paragraph":
+        if (block.text) {
+          const text = `${block.text}\n`;
+          requests.push({
+            insertText: {
+              location: { index: startIndex },
+              text: text,
+            },
+          });
+
+          insertedLength = text.length;
+        }
+        break;
+
+      case "styled":
+        if (block.text && block.style) {
+          const text = `${block.text}\n`;
+          requests.push({
+            insertText: {
+              location: { index: startIndex },
+              text: text,
+            },
+          });
+
+          // Apply text styling
+          const textStyle = {};
+          const fields = [];
+
+          if (block.style.bold) {
+            textStyle.bold = true;
+            fields.push("bold");
+          }
+          if (block.style.italic) {
+            textStyle.italic = true;
+            fields.push("italic");
+          }
+          if (block.style.underline) {
+            textStyle.underline = true;
+            fields.push("underline");
+          }
+          if (block.style.fontSize) {
+            textStyle.fontSize = {
+              magnitude: block.style.fontSize,
+              unit: "PT",
+            };
+            fields.push("fontSize");
+          }
+          if (block.style.foregroundColor) {
+            textStyle.foregroundColor = {
+              color: { rgbColor: block.style.foregroundColor },
+            };
+            fields.push("foregroundColor");
+          }
+
+          if (fields.length > 0) {
+            requests.push({
+              updateTextStyle: {
+                range: {
+                  startIndex: startIndex,
+                  endIndex: startIndex + block.text.length,
+                },
+                textStyle,
+                fields: fields.join(","),
+              },
+            });
+          }
+
+          insertedLength = text.length;
+        }
+        break;
+
+      case "bullets":
+      case "numbered":
+        if (
+          block.items &&
+          Array.isArray(block.items) &&
+          block.items.length > 0
+        ) {
+          let text = "";
+          for (const item of block.items) {
+            text += `${item}\n`;
+          }
+
+          requests.push({
+            insertText: {
+              location: { index: startIndex },
+              text: text,
+            },
+          });
+
+          // Apply bullet formatting to the range
+          const bulletPreset =
+            block.type === "bullets"
+              ? "BULLET_DISC_CIRCLE"
+              : "NUMBERED_DECIMAL";
+
+          requests.push({
+            createParagraphBullets: {
+              range: {
+                startIndex: startIndex,
+                endIndex: startIndex + text.length - 1,
+              },
+              bulletPreset,
+            },
+          });
+
+          insertedLength = text.length;
+        }
+        break;
+
+      case "spacer":
+        const height = block.height || 12;
+        const newlines = Math.max(1, Math.floor(height / 12));
+        const text = "\n".repeat(newlines);
+
+        requests.push({
+          insertText: {
+            location: { index: startIndex },
+            text: text,
+          },
+        });
+
+        insertedLength = text.length;
+        break;
+
+      default:
+        logger.warn({ blockType: block.type }, "Unknown block type");
+        break;
+    }
+
+    // Execute requests for this block
+    if (requests.length > 0) {
+      try {
+        await this.docs.documents.batchUpdate({
+          documentId,
+          requestBody: { requests },
+        });
+      } catch (batchUpdateError) {
+        // If this is an image block and it fails, try to recover by inserting text placeholder
+        if (block.type === "image") {
+          logger.warn(
+            {
+              documentId,
+              blockType: block.type,
+              error: batchUpdateError.message,
+            },
+            "Image insertion failed in batchUpdate, attempting text placeholder fallback"
+          );
+
+          try {
+            // Try to insert just a text placeholder
+            await this.docs.documents.batchUpdate({
+              documentId,
+              requestBody: {
+                requests: [
+                  {
+                    insertText: {
+                      location: { index: startIndex },
+                      text: "[Image could not be inserted]\n",
+                    },
+                  },
+                ],
+              },
+            });
+
+            return "[Image could not be inserted]\n".length;
+          } catch (fallbackError) {
+            logger.error(
+              {
+                documentId,
+                blockType: block.type,
+                originalError: batchUpdateError.message,
+                fallbackError: fallbackError.message,
+              },
+              "Both image insertion and text fallback failed, skipping block"
+            );
+
+            // Return 0 to indicate no content was inserted
+            return 0;
+          }
+        } else {
+          // For non-image blocks, re-throw the error as this indicates a more serious issue
+          throw batchUpdateError;
+        }
+      }
+    }
+
+    return insertedLength;
+  }
+
+  /**
+   * Share document with admin
+   * @private
+   */
   async shareDocumentWithAdmin(documentId) {
     try {
       // Share with admin email if configured
@@ -453,7 +1152,7 @@ class GoogleIntegration {
           documentId,
           error: error.message,
         },
-        "Failed to share document with team"
+        "Failed to share document with admin"
       );
       throw error;
     }
@@ -1313,137 +2012,6 @@ class GoogleIntegration {
       console.log("error?.response?.config?.data");
       console.log(error?.response?.config?.data);
     }
-
-    // // Test Docs API by attempting to read an existing Google Doc
-    // try {
-    //   // Test Docs API by attempting to read an existing Google Doc
-    //   logger.info(
-    //     "Testing Google Docs API connectivity by reading existing document"
-    //   );
-
-    //   // First, find any Google Doc file in the drive
-    //   const searchResponse = await this.drive.files.list({
-    //     q: "mimeType='application/vnd.google-apps.document' and trashed=false",
-    //     fields: "files(id,name)",
-    //     pageSize: 4,
-    //   });
-    //   console.log("searchResponse.data?.files");
-    //   console.log(searchResponse.data?.files);
-
-    //   if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-    //     const testDocumentId = searchResponse.data.files[0].id;
-    //     const testDocumentName = searchResponse.data.files[0].name;
-
-    //     logger.info(
-    //       {
-    //         documentId: testDocumentId,
-    //         documentName: testDocumentName,
-    //       },
-    //       "Found existing document for testing"
-    //     );
-
-    //     // Attempt to read the document content
-    //     const doc = await this.docs.documents.get({
-    //       documentId: testDocumentId,
-    //     });
-
-    //     if (doc.data && doc.data.body) {
-    //       results.docsAPI.success = true;
-
-    //       // Extract text content from the document
-    //       let documentText = "";
-    //       if (doc.data.body.content) {
-    //         for (const element of doc.data.body.content) {
-    //           if (element.paragraph && element.paragraph.elements) {
-    //             for (const textElement of element.paragraph.elements) {
-    //               if (textElement.textRun && textElement.textRun.content) {
-    //                 documentText += textElement.textRun.content;
-    //               }
-    //             }
-    //           }
-    //         }
-    //       }
-
-    //       console.log("=== GOOGLE DOCS CONTENT ===");
-    //       console.log(`Document: ${testDocumentName}`);
-    //       console.log(`Document ID: ${testDocumentId}`);
-    //       // console.log("Content:");
-    //       // console.log(documentText);
-    //       console.log("=== END GOOGLE DOCS CONTENT ===");
-
-    //       logger.info(
-    //         {
-    //           documentId: testDocumentId,
-    //           documentName: testDocumentName,
-    //           contentLength: documentText.length,
-    //         },
-    //         "Google Docs API test successful - read document content"
-    //       );
-    //     }
-    //   } else {
-    //     // No documents found - try to create one for testing
-    //     logger.info("No existing documents found, creating test document");
-
-    //     const testDoc = await this.docs.documents.create({
-    //       requestBody: {
-    //         title: "API_TEST_DOCUMENT_DELETE_ME_" + Date.now(),
-    //       },
-    //     });
-
-    //     if (testDoc.data && testDoc.data.documentId) {
-    //       results.docsAPI.success = true;
-
-    //       console.log("=== GOOGLE DOCS TEST ===");
-    //       console.log("Created empty test document successfully");
-    //       console.log(`Document ID: ${testDoc.data.documentId}`);
-    //       console.log("=== END GOOGLE DOCS TEST ===");
-
-    //       logger.info(
-    //         {
-    //           documentId: testDoc.data.documentId,
-    //         },
-    //         "Google Docs API test successful - created test document"
-    //       );
-
-    //       // Clean up the test document
-    //       try {
-    //         await this.drive.files.delete({
-    //           fileId: testDoc.data.documentId,
-    //         });
-    //         logger.info("Test document cleaned up successfully");
-    //       } catch (cleanupError) {
-    //         logger.warn(
-    //           {
-    //             documentId: testDoc.data.documentId,
-    //             error: cleanupError.message,
-    //           },
-    //           "Failed to clean up test document"
-    //         );
-    //       }
-    //     }
-    //   }
-    // } catch (error) {
-    //   results.docsAPI.error = {
-    //     message: error.message,
-    //     code: error.code,
-    //     status: error.status,
-    //   };
-    //   logger.error(
-    //     {
-    //       error: error.message,
-    //       code: error.code,
-    //       status: error.status,
-    //     },
-    //     "Google Docs API test failed"
-    //   );
-    //   console.log(error);
-    //   console.log("error?.errors");
-    //   console.log(error?.errors);
-    //   console.log("error?.response?.data?.error");
-    //   console.log(error?.response?.data?.error);
-    //   console.log("error?.response?.config?.data");
-    //   console.log(error?.response?.config?.data);
-    // }
 
     return results;
   }

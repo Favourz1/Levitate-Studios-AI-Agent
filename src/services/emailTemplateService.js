@@ -262,10 +262,10 @@ class EmailTemplateService {
               <div style="text-align: center; margin: 30px 0;">
                 <a href="${
                   documentResult.webViewLink
-                }" class="btn btn-success" target="_blank">
+                }" class="btn btn-success" target="_blank" style="color: white;">
                   <span class="icon">📄</span>Review Document
                 </a>
-                <a href="${sendToClientUrl}" class="btn btn-primary">
+                <a href="${sendToClientUrl}" class="btn btn-primary" style="color: white;">
                   <span class="icon">📧</span>Send to Client
                 </a>
               </div>

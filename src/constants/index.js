@@ -81,6 +81,17 @@ const TeamRole = {
   COPY_WRITER: "COPY_WRITER",
 };
 
+// Brand Assets
+const BrandAssets = {
+  LEVITATE_LOGO_FILE_ID: "1UXsLtQ0HemLj7aHjssGu_ipp4mRBj0Hc", // Google Drive file ID for logo
+  LEVITATE_LOGO_URL:
+    "https://levitate.ng/wp-content/uploads/2022/02/Group-1.svg", // Fallback URL
+  LOGO_DIMENSIONS: {
+    WIDTH: 125, // pixels
+    HEIGHT: 32, // pixels
+  },
+};
+
 module.exports = {
   ProjectPhase,
   DocumentType,
@@ -92,4 +103,5 @@ module.exports = {
   JobStatus,
   WebhookProvider,
   TeamRole,
+  BrandAssets,
 };

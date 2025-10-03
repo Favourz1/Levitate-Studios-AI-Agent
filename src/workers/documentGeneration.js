@@ -22,7 +22,7 @@ const {
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
 const { appConfig } = require("@/config");
-const { DocumentType, DocumentStatus } = require("@/constants");
+const { DocumentType, DocumentStatus, BrandAssets } = require("@/constants");
 
 /**
  * Brand Origin Document Generation Processor
@@ -399,6 +399,306 @@ async function generateBrandOriginWithLLM(context) {
 }
 
 /**
+ * Convert brand origin document text into formatted blocks for Google Docs
+ * @param {string} documentText - The generated brand origin document text
+ * @param {Object} project - Project information
+ * @returns {Array} Array of formatted blocks for createFormattedDocument
+ */
+function convertBrandOriginToFormattedBlocks(documentText, project) {
+  const blocks = [];
+
+  try {
+    // Add logo at the top
+    blocks.push({
+      type: "image",
+      fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
+      url: BrandAssets.LEVITATE_LOGO_URL, // Fallback URL
+      width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
+      height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
+    });
+
+    // Add some spacing after logo
+    blocks.push({
+      type: "spacer",
+      height: 24,
+    });
+
+    // Add header table with client and document information
+    const clientName = project?.client?.name || "Client Name";
+    const projectName = project?.name || "Brand Development Project";
+
+    blocks.push({
+      type: "table",
+      rows: [
+        [`Client: ${clientName}`, "Doc: Brand Origins / Creative Brief"],
+        [`Project: ${projectName}`, "Task: Generate detailed brand document"],
+      ],
+      style: {
+        borderWidth: 1,
+        fontSize: 10,
+      },
+    });
+
+    // Add spacing after header table
+    blocks.push({
+      type: "spacer",
+      height: 24,
+    });
+
+    // Parse the document text and create formatted blocks
+    const lines = documentText.split("\n");
+    let currentSection = "";
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      if (!line) {
+        // Add minimal spacing for empty lines
+        blocks.push({
+          type: "spacer",
+          height: 6,
+        });
+        continue;
+      }
+
+      // Skip header table lines if they exist in the document
+      if (
+        line.includes("|") &&
+        (line.includes("Client:") ||
+          line.includes("Doc:") ||
+          line.includes("Project:") ||
+          line.includes("Task:"))
+      ) {
+        continue; // Skip these as we've already added our own header table
+      }
+
+      // Check for Roman numeral headings (I., II., III., etc.)
+      const romanNumeralMatch = line.match(/^([IVX]+)\.\s*(.+)$/);
+      if (romanNumeralMatch) {
+        const [, numeral, title] = romanNumeralMatch;
+
+        // Add extra spacing before new sections (except the first one)
+        if (blocks.length > 3) {
+          // Account for logo, spacer, and header table
+          blocks.push({
+            type: "spacer",
+            height: 18,
+          });
+        }
+
+        blocks.push({
+          type: "heading",
+          text: `${numeral}. ${title.toUpperCase()}`,
+          level: 2,
+          style: {
+            bold: true,
+            fontSize: 14,
+          },
+        });
+        currentSection = title.toLowerCase();
+        continue;
+      }
+
+      // Check for "Next Steps" heading (special case)
+      if (line.toLowerCase().includes("next steps")) {
+        blocks.push({
+          type: "spacer",
+          height: 18,
+        });
+        blocks.push({
+          type: "heading",
+          text: "NEXT STEPS",
+          level: 2,
+          style: {
+            bold: true,
+            fontSize: 14,
+          },
+        });
+        continue;
+      }
+
+      // Check for sub-headings or bold labels (common in brand origin docs)
+      if (line.includes(":") && line.length < 150) {
+        const colonIndex = line.indexOf(":");
+        const label = line.substring(0, colonIndex + 1);
+        const content = line.substring(colonIndex + 1).trim();
+
+        // Check if this looks like a section label (Functional:, Emotional:, etc.)
+        const commonLabels = [
+          "functional",
+          "sensory",
+          "emotional",
+          "founders",
+          "business",
+          "perspective",
+          "key promise",
+          "tone of voice",
+          "narrative guidance",
+          "musts",
+          "must nots",
+          "visual",
+          "tone",
+        ];
+
+        const isLabel = commonLabels.some((labelText) =>
+          label.toLowerCase().includes(labelText)
+        );
+
+        if (isLabel) {
+          if (content) {
+            // Label with content on same line - make label bold
+            blocks.push({
+              type: "styled",
+              text: `${label} ${content}`,
+              style: {
+                bold: true,
+              },
+            });
+          } else {
+            // Label only, likely followed by content
+            blocks.push({
+              type: "styled",
+              text: label,
+              style: {
+                bold: true,
+                fontSize: 12,
+              },
+            });
+          }
+          continue;
+        } else if (content) {
+          // Regular line with colon but not a section label
+          blocks.push({
+            type: "paragraph",
+            text: line,
+          });
+          continue;
+        }
+      }
+
+      // Check for bullet points (lines starting with -, •, or *)
+      if (line.match(/^[-•*]\s+/)) {
+        const bulletText = line.replace(/^[-•*]\s+/, "");
+
+        // Look ahead to collect all bullet items
+        const bulletItems = [bulletText];
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim().match(/^[-•*]\s+/)) {
+          bulletItems.push(lines[j].trim().replace(/^[-•*]\s+/, ""));
+          j++;
+        }
+
+        blocks.push({
+          type: "bullets",
+          items: bulletItems,
+        });
+
+        i = j - 1; // Skip the processed lines
+        continue;
+      }
+
+      // Check for numbered lists
+      if (line.match(/^\d+\.\s+/)) {
+        const numberedText = line.replace(/^\d+\.\s+/, "");
+
+        // Look ahead to collect all numbered items
+        const numberedItems = [numberedText];
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim().match(/^\d+\.\s+/)) {
+          numberedItems.push(lines[j].trim().replace(/^\d+\.\s+/, ""));
+          j++;
+        }
+
+        blocks.push({
+          type: "numbered",
+          items: numberedItems,
+        });
+
+        i = j - 1; // Skip the processed lines
+        continue;
+      }
+
+      // Check for special formatting cues
+      if (line.includes("**") || line.includes("*")) {
+        // Handle markdown-style formatting
+        let formattedText = line;
+        let isBold = false;
+        let isItalic = false;
+
+        if (line.includes("**")) {
+          formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, "$1");
+          isBold = true;
+        } else if (line.includes("*")) {
+          formattedText = formattedText.replace(/\*(.*?)\*/g, "$1");
+          isItalic = true;
+        }
+
+        blocks.push({
+          type: "styled",
+          text: formattedText,
+          style: {
+            bold: isBold,
+            italic: isItalic,
+          },
+        });
+        continue;
+      }
+
+      // Regular paragraph
+      blocks.push({
+        type: "paragraph",
+        text: line,
+      });
+    }
+
+    // Add final spacing
+    blocks.push({
+      type: "spacer",
+      height: 12,
+    });
+
+    logger.info(
+      {
+        projectId: project?.id,
+        originalTextLength: documentText.length,
+        blocksCount: blocks.length,
+      },
+      "Brand origin document converted to formatted blocks"
+    );
+
+    return blocks;
+  } catch (error) {
+    logger.error(
+      {
+        projectId: project?.id,
+        error: error.message,
+        documentTextLength: documentText?.length,
+      },
+      "Failed to convert brand origin document to formatted blocks"
+    );
+
+    // Fallback: return simple blocks with logo and text
+    return [
+      {
+        type: "image",
+        fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
+        url: BrandAssets.LEVITATE_LOGO_URL, // Fallback URL
+        width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
+        height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
+      },
+      {
+        type: "spacer",
+        height: 24,
+      },
+      {
+        type: "paragraph",
+        text: documentText,
+      },
+    ];
+  }
+}
+
+/**
  * Create Google Drive document and database records
  * Uses separate transactions to avoid timeout issues with Google API calls
  * @param {number} projectId - Project ID
@@ -475,14 +775,43 @@ async function createDocumentRecords(
       );
     }
 
-    googleDoc = await googleIntegration.createDocument(
-      documentRecord.documentTitle,
+    // Convert brand origin document to formatted blocks
+    const formattedBlocks = convertBrandOriginToFormattedBlocks(
       brandOriginDocument.document,
-      {
-        folderId,
-        makePublicReadable: false,
-      }
+      documentRecord.project
     );
+
+    // Create formatted document with logo, styling, and proper structure
+    try {
+      googleDoc = await googleIntegration.createFormattedDocument(
+        documentRecord.documentTitle,
+        formattedBlocks,
+        {
+          folderId,
+          makePublicReadable: false,
+          shareWithEmails: [], // PM will be shared separately below
+        }
+      );
+    } catch (formattedDocError) {
+      // Fallback to regular document creation if formatted document fails
+      logger.warn(
+        {
+          projectId,
+          error: formattedDocError.message,
+          correlationId,
+        },
+        "Formatted document creation failed, falling back to regular document creation"
+      );
+
+      googleDoc = await googleIntegration.createDocument(
+        documentRecord.documentTitle,
+        brandOriginDocument.document,
+        {
+          folderId,
+          makePublicReadable: false,
+        }
+      );
+    }
 
     logger.info(
       {

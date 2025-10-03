@@ -228,14 +228,48 @@ Generate a complete Brand Origin Document that:
 
 ## Output Format
 Present as a properly formatted brand origin document with:
-- Clear section headers (I., II., III., etc.)
-- Professional table formatting where appropriate
-- Detailed deliverables section with specific creative outputs
-- Next steps for implementation
+- Clear section headers using Roman numerals (I., II., III., etc.) in ALL CAPS
+- Each section header on its own line followed by content
+- Use bullet points (- or •) for lists within sections
+- Use numbered lists (1., 2., 3.) for deliverables and next steps
+- Professional and clean structure throughout
+- No markdown formatting (**, *, etc.) - use plain text
 
-Begin with: "| Client: [Client Name] | Doc: **Brand Origins / Creative Brief** |"
+## Document Structure Requirements
+1. **Do NOT include** the header table (Client: | Doc:) - this will be added automatically
+2. **Start directly** with the first section: "I. WHO AM I?"
+3. **Section headers** must be exactly: "I. WHO AM I?", "II. WHERE DO I COME FROM?", etc.
+4. **Use consistent formatting** throughout all sections
+5. **End with** a "Next Steps" section using numbered lists
 
-Generate the complete brand origin document now.`;
+## Example Section Format:
+
+I. WHO AM I?
+
+[Content paragraph describing the brand identity...]
+
+II. WHERE DO I COME FROM?
+
+[Content paragraph describing brand origins...]
+
+VI. KEY INSIGHTS
+
+- Founders' Perspective: [insight text]
+- Business Perspective: [insight text]
+
+XII. DELIVERABLES
+
+1. Social Media Strategy
+2. Campaign Concept Playbook
+3. Engagement Guidelines
+
+Next Steps
+
+1. Review and approve this Brand Origins document
+2. Confirm deliverables and timelines
+3. Sign off. Paymoney!
+
+Generate the complete brand origin document now following this exact format.`;
   }
 
   /**
