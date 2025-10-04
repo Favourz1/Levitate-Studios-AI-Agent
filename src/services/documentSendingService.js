@@ -232,6 +232,7 @@ class DocumentSendingService {
           );
 
         await brevoIntegration.sendTransactionalEmail({
+          senderEmail: `info@${appConfig.emailDomain}`,
           to: [result.client.primaryEmail],
           subject: clientEmailTemplate.subject,
           htmlContent: clientEmailTemplate.htmlContent,

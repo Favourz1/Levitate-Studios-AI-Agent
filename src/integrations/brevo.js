@@ -54,8 +54,8 @@ class BrevoIntegration {
         async () => {
           const payload = {
             sender: {
-              name: "Levitate Studios",
-              email: `noreply@${appConfig.emailDomain}`,
+              name: emailData?.senderName || "Levitate Studios",
+              email: emailData?.senderEmail || `noreply@${appConfig.emailDomain}`,
             },
             to: emailData.to.map((email) => ({ email })),
             subject: emailData.subject,
