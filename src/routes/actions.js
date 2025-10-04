@@ -300,10 +300,9 @@ router.get(
 );
 
 /**
- * POST /actions/generate-send-link
  * Generate a new send-to-client link for team members
  */
-router.post(
+router.get(
   "/generate-send-link",
   authenticateActionToken,
   asyncHandler(async (req, res) => {
