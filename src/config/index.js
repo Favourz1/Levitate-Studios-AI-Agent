@@ -18,6 +18,7 @@ const envSchema = Joi.object({
     .valid("development", "production", "test")
     .default("development"),
   JWT_SECRET: Joi.string().required(),
+  BASE_URL: Joi.string().uri().required(),
 
   // Google
   GOOGLE_CLIENT_ID: Joi.string().required(),
@@ -74,8 +75,9 @@ const appConfig = {
     port: envVars.PORT,
     nodeEnv: envVars.NODE_ENV,
     jwtSecret: envVars.JWT_SECRET,
-    frontendUrl: envVars.FRONTEND_URL,
+    frontendUrl: envVars.FRONTEND_URL.endsWith('/') ? envVars.FRONTEND_URL.slice(0, -1) : envVars.FRONTEND_URL,
     adminEmail: envVars.ADMIN_EMAIL,
+    baseUrl: envVars.BASE_URL.endsWith('/') ? envVars.BASE_URL.slice(0, -1) : envVars.BASE_URL,
   },
   google: {
     clientId: envVars.GOOGLE_CLIENT_ID,

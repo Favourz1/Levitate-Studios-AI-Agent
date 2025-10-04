@@ -12,6 +12,7 @@ const { brevoIntegration } = require("@/integrations/brevo");
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
+const { ActionService } = require("@/services/actionService");
 const {
   ValidationError,
   LLMError,
@@ -22,7 +23,12 @@ const {
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
 const { appConfig } = require("@/config");
-const { DocumentType, DocumentStatus, BrandAssets } = require("@/constants");
+const {
+  DocumentType,
+  DocumentStatus,
+  BrandAssets,
+  ActionType,
+} = require("@/constants");
 
 /**
  * Brand Origin Document Generation Processor
@@ -65,7 +71,7 @@ const brandOriginGenerationProcessor = async (job) => {
     // Step 4: Update Asana task and add PM comment
     await updateAsanaWorkflow(context, documentResult, correlationId);
 
-    // Step 5: Send PM notification email
+    // Step 5: Send PM notification email with action tokens
     await sendPMAdminNotificationEmail(
       context,
       documentResult,
@@ -1272,7 +1278,37 @@ async function sendPMAdminNotificationEmail(
       return;
     }
 
-    // Generate email template
+    // Generate action tokens for PM
+    const sendToClientToken = await ActionService.createActionToken(
+      {
+        action: ActionType.SEND_TO_CLIENT,
+        documentId: documentResult.documentId,
+        projectId: context.project.id,
+        userId: pmUser.id,
+        userEmail: pmUser.email,
+        userName: pmUser.name,
+      },
+      "24h"
+    );
+
+    const generateLinkToken = await ActionService.createActionToken(
+      {
+        action: ActionType.GENERATE_SEND_LINK,
+        documentId: documentResult.documentId,
+        projectId: context.project.id,
+        userId: pmUser.id,
+        userEmail: pmUser.email,
+        userName: pmUser.name,
+      },
+      "24h"
+    );
+
+    const actionTokens = {
+      sendToClientToken: sendToClientToken.token,
+      generateLinkToken: generateLinkToken.token,
+    };
+
+    // Generate email template with action tokens
     // TODO: Create generateBudgetTimelineNotificationTemplate and generateBudgetTimelineVariantNotificationTemplate in emailTemplateService.js
     const emailTemplate = (() => {
       switch (documentType) {
@@ -1280,38 +1316,135 @@ async function sendPMAdminNotificationEmail(
           return EmailTemplateService.generateBrandOriginNotificationTemplate(
             context.project,
             documentResult,
-            context.emailThread
+            context.emailThread,
+            actionTokens
           );
         case DocumentType.BUDGET_TIMELINE:
           return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
             context.project,
             documentResult,
-            context.emailThread
+            context.emailThread,
+            actionTokens
           );
         case DocumentType.BUDGET_TIMELINE_VARIANT:
           return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
             context.project,
             documentResult,
-            context.emailThread
+            context.emailThread,
+            actionTokens
           );
         default:
           return EmailTemplateService.generateBrandOriginNotificationTemplate(
             context.project,
             documentResult,
-            context.emailThread
+            context.emailThread,
+            actionTokens
           );
       }
     })();
 
+    // Send to PM
     await brevoIntegration.sendTransactionalEmail({
-      to:
-        appConfig.server.nodeEnv === "production"
-          ? [pmUser.email, appConfig.server.adminEmail]
-          : [pmUser.email],
+      to: [pmUser.email],
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
       // Don't use reply-to for internal notifications
     });
+
+    // Also send to admin in production with separate tokens
+    if (
+      appConfig.server.nodeEnv === "production" &&
+      appConfig.server.adminEmail
+    ) {
+      // Find admin user for tokens
+      const adminUser = await prisma.teamMember.findFirst({
+        where: {
+          email: appConfig.server.adminEmail,
+          isActive: true,
+        },
+      });
+
+      if (adminUser) {
+        // Generate separate action tokens for admin
+        const adminSendToClientToken = await ActionService.createActionToken(
+          {
+            action: ActionType.SEND_TO_CLIENT,
+            documentId: documentResult.documentId,
+            projectId: context.project.id,
+            userId: adminUser.id,
+            userEmail: adminUser.email,
+            userName: adminUser.name,
+          },
+          "24h"
+        );
+
+        const adminGenerateLinkToken = await ActionService.createActionToken(
+          {
+            action: ActionType.GENERATE_SEND_LINK,
+            documentId: documentResult.documentId,
+            projectId: context.project.id,
+            userId: adminUser.id,
+            userEmail: adminUser.email,
+            userName: adminUser.name,
+          },
+          "24h"
+        );
+
+        const adminActionTokens = {
+          sendToClientToken: adminSendToClientToken.token,
+          generateLinkToken: adminGenerateLinkToken.token,
+        };
+
+        // Generate admin email template with admin tokens
+        const adminEmailTemplate = (() => {
+          switch (documentType) {
+            case DocumentType.BRAND_ORIGIN:
+              return EmailTemplateService.generateBrandOriginNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                adminActionTokens
+              );
+            case DocumentType.BUDGET_TIMELINE:
+              return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                adminActionTokens
+              );
+            case DocumentType.BUDGET_TIMELINE_VARIANT:
+              return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                adminActionTokens
+              );
+            default:
+              return EmailTemplateService.generateBrandOriginNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                adminActionTokens
+              );
+          }
+        })();
+
+        await brevoIntegration.sendTransactionalEmail({
+          to: [appConfig.server.adminEmail],
+          subject: adminEmailTemplate.subject,
+          htmlContent: adminEmailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            projectId: context.project.id,
+            adminEmail: appConfig.server.adminEmail,
+            correlationId,
+          },
+          "Admin notification email sent successfully"
+        );
+      }
+    }
 
     // Log the email in database
     if (context.emailThread) {

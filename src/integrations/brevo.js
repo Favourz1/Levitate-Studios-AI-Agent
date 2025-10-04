@@ -66,6 +66,12 @@ class BrevoIntegration {
             replyTo: emailData.replyTo
               ? { email: emailData.replyTo }
               : undefined,
+            attachments: emailData.attachments
+              ? emailData.attachments.map((attachment) => ({
+                  name: attachment.name,
+                  url: attachment.url,
+                }))
+              : undefined,
           };
 
           return this.makeRequest("/smtp/email", "POST", payload);

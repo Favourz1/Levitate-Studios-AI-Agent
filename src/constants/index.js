@@ -92,6 +92,14 @@ const BrandAssets = {
   },
 };
 
+// Action Types for JWT tokens and email buttons
+const ActionType = {
+  SEND_TO_CLIENT: "SEND_TO_CLIENT",
+  GENERATE_SEND_LINK: "GENERATE_SEND_LINK",
+  CONFIRM_ACCEPTED: "CONFIRM_ACCEPTED",
+  REVIEW_DOCUMENT: "REVIEW_DOCUMENT",
+};
+
 module.exports = {
   ProjectPhase,
   DocumentType,
@@ -104,4 +112,5 @@ module.exports = {
   WebhookProvider,
   TeamRole,
   BrandAssets,
+  ActionType,
 };

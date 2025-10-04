@@ -135,12 +135,14 @@ const authenticateActionToken = (req, res, next) => {
     const decoded = jwt.verify(token, appConfig.server.jwtSecret);
 
     // Store the decoded token data for use in route handlers
-    req.body.actionData = decoded;
+    req.actionData = decoded;
 
     next();
   } catch (error) {
+    console.log("error from authenticateActionToken");
+    console.log(error);
     logger.warn(
-      { token: token.substring(0, 10) + "..." },
+      { token: token.substring(0, 10) + "...", stack: error.stack },
       "Invalid action token"
     );
     throw new UnauthorizedError("Invalid or expired action token");

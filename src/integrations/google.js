@@ -5,6 +5,7 @@ const { GoogleError } = require("@/utils/errors");
 const { createLogger, logIntegrationCall } = require("@/utils/logger");
 const { retry } = require("@/utils");
 const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
+const { Readable } = require("stream");
 
 const logger = createLogger("integration:google");
 
@@ -1342,6 +1343,259 @@ class GoogleIntegration {
       );
       throw new GoogleError("exportDocumentAsHtml", error, {
         documentId,
+      });
+    }
+  }
+
+  /**
+   * Export Google Doc as PDF and save to Drive folder
+   * @param {string} documentId - Google Doc ID to export
+   * @param {string} pdfName - Name for the PDF file
+   * @param {string} folderId - Optional folder ID to save PDF in
+   * @returns {Promise<Object>} PDF file metadata
+   */
+  async exportDocumentAsPdf(documentId, pdfName, folderId = null) {
+    const startTime = Date.now();
+
+    try {
+      // Verify authentication first
+      await this.verifyAuthentication();
+
+      // Validate inputs
+      if (!documentId || typeof documentId !== "string") {
+        throw new Error("Document ID is required and must be a string");
+      }
+
+      if (!pdfName || typeof pdfName !== "string") {
+        throw new Error("PDF name is required and must be a string");
+      }
+
+      const result = await retry(
+        async () => {
+          logger.info(
+            {
+              documentId,
+              pdfName,
+              folderId,
+            },
+            "Starting PDF export from Google Doc"
+          );
+
+          // Step 1: Export the document as PDF
+          const exportResponse = await this.drive.files.export({
+            fileId: documentId,
+            mimeType: "application/pdf",
+          });
+
+          if (!exportResponse.data) {
+            throw new Error("No PDF data received from export");
+          }
+
+          // Handle different response data types (Buffer, Blob, or string)
+          let pdfBuffer;
+          let dataSize;
+
+          if (exportResponse.data instanceof Buffer) {
+            pdfBuffer = exportResponse.data;
+            dataSize = pdfBuffer.length;
+          } else if (typeof exportResponse.data === "string") {
+            pdfBuffer = Buffer.from(exportResponse.data, "binary");
+            dataSize = pdfBuffer.length;
+          } else if (
+            exportResponse.data.constructor.name === "Blob" ||
+            exportResponse.data.stream
+          ) {
+            // Handle Blob response - convert to Buffer
+            try {
+              if (typeof exportResponse.data.arrayBuffer === "function") {
+                const arrayBuffer = await exportResponse.data.arrayBuffer();
+                pdfBuffer = Buffer.from(arrayBuffer);
+                dataSize = pdfBuffer.length;
+              } else if (typeof exportResponse.data.stream === "function") {
+                // Handle readable stream
+                const chunks = [];
+                const stream = exportResponse.data.stream();
+                const reader = stream.getReader();
+
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  chunks.push(value);
+                }
+
+                pdfBuffer = Buffer.concat(
+                  chunks.map((chunk) => Buffer.from(chunk))
+                );
+                dataSize = pdfBuffer.length;
+              } else {
+                throw new Error(
+                  "Unsupported Blob format - no arrayBuffer or stream method"
+                );
+              }
+            } catch (blobError) {
+              throw new Error(
+                `Failed to convert Blob to Buffer: ${blobError.message}`
+              );
+            }
+          } else {
+            // Fallback: try to create buffer from the data
+            try {
+              pdfBuffer = Buffer.from(exportResponse.data);
+              dataSize = pdfBuffer.length;
+            } catch (bufferError) {
+              throw new Error(
+                `Unsupported data type for PDF export: ${typeof exportResponse.data}. Expected Buffer, string, or Blob.`
+              );
+            }
+          }
+
+          logger.info(
+            {
+              documentId,
+              dataSize,
+              dataType: exportResponse.data.constructor.name,
+            },
+            "PDF export completed, creating file in Drive"
+          );
+
+          // Step 2: Create PDF file in Google Drive
+          let sanitizedName = pdfName.replace(/[<>:"/\\|?*]/g, "_").trim();
+          if (!sanitizedName.toLowerCase().endsWith(".pdf")) {
+            sanitizedName += ".pdf";
+          }
+
+          // Convert Buffer to readable stream for googleapis compatibility
+          const pdfStream = new Readable({
+            read() {
+              this.push(pdfBuffer);
+              this.push(null); // End the stream
+            },
+          });
+
+          const createRequest = {
+            requestBody: {
+              name: sanitizedName,
+              mimeType: "application/pdf",
+            },
+            media: {
+              mimeType: "application/pdf",
+              body: pdfStream,
+            },
+            fields:
+              "id,name,webViewLink,webContentLink,size,createdTime,modifiedTime",
+          };
+
+          // Add to folder if specified
+          if (folderId) {
+            createRequest.requestBody.parents = [folderId];
+          }
+
+          const pdfFile = await this.drive.files.create(createRequest);
+
+          if (!pdfFile.data || !pdfFile.data.id) {
+            throw new Error("Failed to create PDF file - no file ID returned");
+          }
+
+          logger.info(
+            {
+              documentId,
+              pdfFileId: pdfFile.data.id,
+              pdfName: pdfFile.data.name,
+              size: pdfFile.data.size,
+              folderId,
+            },
+            "PDF file created successfully in Google Drive"
+          );
+
+          // Step 3: Share with admin if configured
+          try {
+            await this.shareDocumentWithAdmin(pdfFile.data.id);
+          } catch (shareError) {
+            // Log warning but don't fail the export
+            logger.warn(
+              {
+                pdfFileId: pdfFile.data.id,
+                error: shareError.message,
+              },
+              "Failed to share PDF with admin, but export completed successfully"
+            );
+          }
+
+          return {
+            id: pdfFile.data.id,
+            name: pdfFile.data.name,
+            webViewLink: pdfFile.data.webViewLink,
+            webContentLink: pdfFile.data.webContentLink,
+            size: pdfFile.data.size,
+            createdTime: pdfFile.data.createdTime,
+            modifiedTime: pdfFile.data.modifiedTime,
+            mimeType: "application/pdf",
+            originalDocumentId: documentId,
+          };
+        },
+        3, // max attempts
+        2000 // base delay - PDF export can be slower
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "exportDocumentAsPdf",
+        true,
+        duration
+      );
+
+      logger.info(
+        {
+          documentId,
+          pdfFileId: result.id,
+          pdfName: result.name,
+          duration,
+        },
+        "PDF export and creation completed successfully"
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "exportDocumentAsPdf",
+        false,
+        duration,
+        error
+      );
+
+      logger.error(
+        {
+          documentId,
+          pdfName,
+          error: error.message,
+          duration,
+        },
+        "PDF export failed"
+      );
+
+      // Enhance error message based on error type
+      let enhancedMessage = error.message;
+      if (error.code === 403) {
+        enhancedMessage = `Permission denied: Service account '${appConfig.google.clientEmail}' lacks permission to export document or create files. Ensure the service account has Editor role and APIs are enabled.`;
+      } else if (error.code === 404) {
+        enhancedMessage = `Document not found: Document ID '${documentId}' does not exist or is not accessible for PDF export.`;
+      } else if (error.code === 429) {
+        enhancedMessage =
+          "Rate limit exceeded: Too many requests to Google API. Retry after delay.";
+      }
+
+      throw new GoogleError("exportDocumentAsPdf", new Error(enhancedMessage), {
+        documentId,
+        pdfName,
+        folderId,
+        originalError: error.message,
+        code: error.code,
+        serviceAccount: appConfig.google.clientEmail,
       });
     }
   }
