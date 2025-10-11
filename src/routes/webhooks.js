@@ -17,6 +17,24 @@ const logger = createLogger("routes:webhooks");
 router.post(
   "/brevo/inbound",
   asyncHandler(async (req, res) => {
+    // Log all incoming Brevo webhook data for testing
+    logger.info(
+      {
+        headers: req.headers,
+        body: req.body,
+        rawBody: req.rawBodyString || req.rawBodyBuffer?.toString(),
+        method: req.method,
+        url: req.url,
+      },
+      "Brevo webhook received - full payload logging"
+    );
+
+    console.log("Brevo Webhook Headers:", req.headers);
+    console.log("Brevo Webhook Body:", req.body);
+    console.log(
+      "Brevo Webhook Raw Body:",
+      req.rawBodyString || req.rawBodyBuffer?.toString()
+    );
     // TODO: Implement Brevo webhook handler
     sendSuccessResponse(res, { message: "Webhook received" });
   })
