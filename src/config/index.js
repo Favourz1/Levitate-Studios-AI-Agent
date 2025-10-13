@@ -45,6 +45,7 @@ const envSchema = Joi.object({
   ADMIN_EMAIL: Joi.string().email().required(),
   FRONTEND_URL: Joi.string().uri().required(),
   EMAIL_DOMAIN: Joi.string().required(),
+  EMAIL_REPLY_DOMAIN: Joi.string().required(),
   LOG_LEVEL: Joi.string()
     .valid("error", "warn", "info", "debug", "trace")
     .default("info"),
@@ -75,9 +76,13 @@ const appConfig = {
     port: envVars.PORT,
     nodeEnv: envVars.NODE_ENV,
     jwtSecret: envVars.JWT_SECRET,
-    frontendUrl: envVars.FRONTEND_URL.endsWith('/') ? envVars.FRONTEND_URL.slice(0, -1) : envVars.FRONTEND_URL,
+    frontendUrl: envVars.FRONTEND_URL.endsWith("/")
+      ? envVars.FRONTEND_URL.slice(0, -1)
+      : envVars.FRONTEND_URL,
     adminEmail: envVars.ADMIN_EMAIL,
-    baseUrl: envVars.BASE_URL.endsWith('/') ? envVars.BASE_URL.slice(0, -1) : envVars.BASE_URL,
+    baseUrl: envVars.BASE_URL.endsWith("/")
+      ? envVars.BASE_URL.slice(0, -1)
+      : envVars.BASE_URL,
   },
   google: {
     clientId: envVars.GOOGLE_CLIENT_ID,
@@ -101,6 +106,7 @@ const appConfig = {
     anthropicApiKey: envVars.ANTHROPIC_API_KEY,
   },
   emailDomain: envVars.EMAIL_DOMAIN,
+  emailReplyDomain: envVars.EMAIL_REPLY_DOMAIN,
   logLevel: envVars.LOG_LEVEL,
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,

@@ -1,4 +1,4 @@
-      const { appConfig } = require("@/config");
+const { appConfig } = require("@/config");
 const { createLogger } = require("@/utils/logger");
 
 const logger = createLogger("service:email-template");
@@ -886,6 +886,120 @@ class EmailTemplateService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Generate admin notification email template for new client email
+   * @param {Object} project - Project object with client info
+   * @param {Object} brevoItem - Brevo email item
+   * @param {Object} emailRecord - Email database record
+   * @param {Array} attachmentLinks - Array of Google Drive attachment links
+   * @returns {Object} Email template
+   */
+  static generateAdminInboundEmailNotificationTemplate(
+    project,
+    brevoItem,
+    emailRecord,
+    attachmentLinks = []
+  ) {
+    const emailContent =
+      brevoItem.ExtractedMarkdownMessage || brevoItem.RawTextBody || "";
+
+    const subject = `New Client Email: ${project.client.name} - ${project.name}`;
+
+    const attachmentsHtml =
+      attachmentLinks && attachmentLinks.length > 0
+        ? `
+    <div style="margin-bottom: 20px;">
+      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">Attachments:</h2>
+      <ul style="list-style: none; padding: 0;">
+        ${attachmentLinks
+          .map(
+            (att) => `
+        <li style="background-color: #f8f9fa; padding: 10px; margin-bottom: 5px; border-radius: 5px;">
+          📎 <a href="${
+            att.webViewLink
+          }" target="_blank" style="color: #0a0a0a; text-decoration: none;">${
+              att.name
+            }</a> (${Math.round(att.size / 1024)} KB)
+        </li>
+        `
+          )
+          .join("")}
+      </ul>
+    </div>
+    `
+        : brevoItem.Attachments && brevoItem.Attachments.length > 0
+        ? `
+    <div style="margin-bottom: 20px;">
+      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">Attachments:</h2>
+      <ul style="list-style: none; padding: 0;">
+        ${brevoItem.Attachments.map(
+          (att) => `
+        <li style="background-color: #f8f9fa; padding: 10px; margin-bottom: 5px; border-radius: 5px;">
+          📎 ${att.Name} (${Math.round(att.ContentLength / 1024)} KB)
+        </li>
+        `
+        ).join("")}
+      </ul>
+    </div>
+    `
+        : "";
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>New Client Email</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f4f4; color: #333333; margin: 0; padding: 20px; line-height: 1.6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <h1 style="color: #0a0a0a; margin-bottom: 20px; font-size: 24px;">📧 New Client Email Received</h1>
+    
+    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+      <p style="margin: 5px 0;"><strong>Client:</strong> ${
+        project.client.name
+      }</p>
+      <p style="margin: 5px 0;"><strong>Project:</strong> ${project.name}</p>
+      <p style="margin: 5px 0;"><strong>From:</strong> ${
+        brevoItem.From.Address
+      }</p>
+      <p style="margin: 5px 0;"><strong>Subject:</strong> ${
+        brevoItem.Subject || "(no subject)"
+      }</p>
+      <p style="margin: 5px 0;"><strong>Received:</strong> ${new Date(
+        brevoItem.SentAtDate || Date.now()
+      ).toLocaleString()}</p>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">Message Content:</h2>
+      <div style="background-color: #ffffff; border-left: 4px solid #0a0a0a; padding: 15px; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 14px;">${emailContent}</div>
+    </div>
+
+    ${attachmentsHtml}
+
+    <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-top: 20px;">
+      <p style="margin: 0; font-size: 14px;">
+        <strong>ℹ️ Note:</strong> Levitate AI Agent is analyzing this email to detect intent and determine appropriate actions. 
+        You will be notified of any actions taken.
+      </p>
+    </div>
+
+    <div style="text-align: center; margin-top: 30px; font-size: 12px; color: #666666;">
+      <p>&copy; ${new Date().getFullYear()} Levitate Studios. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    return {
+      subject,
+      htmlContent,
+      textContent: `New Client Email from ${project.client.name}\n\n${emailContent}`,
+    };
   }
 
   /**

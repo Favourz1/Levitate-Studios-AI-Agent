@@ -157,7 +157,7 @@ class FormSubmissionService {
    */
   static generateReplyToAddress(clientId, projectId) {
     const { appConfig } = require("@/config");
-    const domain = appConfig.emailDomain || "levitate.ng";
+    const domain = appConfig.emailReplyDomain || "reply.levitate.ng";
     return `clients-${clientId}-${projectId}@${domain}`;
   }
 

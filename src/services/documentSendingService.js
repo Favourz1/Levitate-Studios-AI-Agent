@@ -293,6 +293,41 @@ class DocumentSendingService {
           },
         });
 
+        // Update current revision's snapshot with latest content
+        try {
+          if (result.document.currentRevisionId) {
+            const latestContent = await googleIntegration.exportDocumentAsText(
+              result.document.driveFileId
+            );
+            console.log("latestContent", latestContent);
+            await tx.documentRevision.update({
+              where: { id: result.document.currentRevisionId },
+              data: {
+                snapshotText: latestContent,
+              },
+            });
+
+            logger.info(
+              {
+                documentId,
+                revisionId: result.document.currentRevisionId,
+                correlationId,
+              },
+              "Updated current revision snapshot with latest content"
+            );
+          }
+        } catch (snapshotError) {
+          logger.error(
+            {
+              documentId,
+              revisionId: result.document.currentRevisionId,
+              error: snapshotError.message,
+              correlationId,
+            },
+            "Failed to update current revision snapshot, continuing with PDF revision"
+          );
+        }
+
         // Create document revision for PDF
         await tx.documentRevision.create({
           data: {
@@ -303,6 +338,7 @@ class DocumentSendingService {
               pdfFileId: pdfFile.id,
               pdfName: pdfFile.name,
               pdfSize: pdfFile.size,
+              sourceRevisionId: result.document.currentRevisionId, // Track source revision
               exportedAt: new Date().toISOString(),
             },
             summary: `Document exported as PDF and sent to client: ${result.client.primaryEmail}`,
@@ -310,7 +346,6 @@ class DocumentSendingService {
             createdAt: new Date(),
           },
         });
-
         // Log outbound email in database
         await tx.email.create({
           data: {

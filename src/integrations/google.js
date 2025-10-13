@@ -2356,6 +2356,81 @@ class GoogleIntegration {
   }
 
   /**
+   * Upload a file from buffer to Google Drive
+   * @param {Buffer} buffer - File buffer
+   * @param {string} fileName - Name for the uploaded file
+   * @param {string} mimeType - MIME type of the file
+   * @param {string} folderId - Optional folder ID to upload to
+   * @returns {Promise<Object>} Uploaded file metadata
+   */
+  async uploadFileFromBuffer(buffer, fileName, mimeType, folderId = null) {
+    const startTime = Date.now();
+
+    try {
+      const { Readable } = require("stream");
+
+      // Create a readable stream from buffer
+      const bufferStream = Readable.from(buffer);
+
+      const fileMetadata = {
+        name: fileName,
+        parents: folderId ? [folderId] : undefined,
+      };
+
+      const media = {
+        mimeType,
+        body: bufferStream,
+      };
+
+      const response = await this.drive.files.create({
+        requestBody: fileMetadata,
+        media: media,
+        fields: "id,name,webViewLink,webContentLink,size,mimeType",
+      });
+
+      const duration = Date.now() - startTime;
+
+      logger.info(
+        {
+          fileId: response.data.id,
+          fileName: response.data.name,
+          size: response.data.size,
+          mimeType: response.data.mimeType,
+          duration,
+        },
+        "File uploaded from buffer successfully"
+      );
+
+      return {
+        id: response.data.id,
+        name: response.data.name,
+        webViewLink: response.data.webViewLink,
+        webContentLink: response.data.webContentLink,
+        size: parseInt(response.data.size || "0", 10),
+        mimeType: response.data.mimeType,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+
+      logger.error(
+        {
+          fileName,
+          mimeType,
+          bufferSize: buffer?.length,
+          error: error.message,
+          duration,
+        },
+        "Failed to upload file from buffer"
+      );
+
+      throw new GoogleError("uploadFileFromBuffer", error, {
+        fileName,
+        mimeType,
+      });
+    }
+  }
+
+  /**
    * Get or create the main documents folder for the application
    * Uses global config to store folder ID for reuse
    */

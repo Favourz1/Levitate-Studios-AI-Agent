@@ -27,12 +27,15 @@ const verifyActionToken = (token) => {
 };
 
 const generateReplyToAddress = (clientId, projectId) => {
-  return `clients-${clientId}-${projectId}@${appConfig.emailDomain}`;
+  return `clients-${clientId}-${projectId}@${appConfig.emailReplyDomain}`;
 };
 
 const parseReplyToAddress = (address) => {
   const regex = new RegExp(
-    `^clients-(\\d+)-(\\d+)@${appConfig.emailDomain.replace(".", "\\.")}$`
+    `^clients-(\\d+)-(\\d+)@${appConfig.emailReplyDomain.replace(
+      /\./g,
+      "\\."
+    )}$`
   );
   const match = address.match(regex);
 

@@ -9,34 +9,105 @@ const {
 } = require("@/middleware/errorHandler");
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { FormSubmissionService } = require("@/services/formSubmissionService");
+const { EmailInboundService } = require("@/services/emailInboundService");
 
 const router = Router();
 const logger = createLogger("routes:webhooks");
 
-// Brevo webhook route
+// Brevo inbound webhook route
 router.post(
   "/brevo/inbound",
   asyncHandler(async (req, res) => {
-    // Log all incoming Brevo webhook data for testing
+    const startTime = Date.now();
+    const correlationId =
+      req.headers["x-correlation-id"] || crypto.randomUUID();
+
     logger.info(
       {
-        headers: req.headers,
-        body: req.body,
-        rawBody: req.rawBodyString || req.rawBodyBuffer?.toString(),
+        correlationId,
         method: req.method,
         url: req.url,
+        contentType: req.headers["content-type"],
+        contentLength: req.headers["content-length"],
+        userAgent: req.headers["user-agent"],
       },
-      "Brevo webhook received - full payload logging"
+      "Brevo inbound webhook request received"
     );
 
-    console.log("Brevo Webhook Headers:", req.headers);
-    console.log("Brevo Webhook Body:", req.body);
-    console.log(
-      "Brevo Webhook Raw Body:",
-      req.rawBodyString || req.rawBodyBuffer?.toString()
-    );
-    // TODO: Implement Brevo webhook handler
-    sendSuccessResponse(res, { message: "Webhook received" });
+    try {
+      // Brevo sends JSON payload directly in body
+      const payload = req.body;
+
+      if (!payload || typeof payload !== "object") {
+        throw new ValidationError(
+          "Invalid payload: expected JSON object from Brevo"
+        );
+      }
+
+      logger.info(
+        {
+          correlationId,
+          itemsCount: payload.items?.length || 0,
+        },
+        "Processing Brevo inbound webhook payload"
+      );
+
+      // Process the webhook using EmailInboundService
+      const result = await EmailInboundService.processBrevoInboundWebhook(
+        payload,
+        correlationId
+      );
+
+      const processingTime = Date.now() - startTime;
+
+      // Send immediate success response
+      sendSuccessResponse(res, {
+        message: "Brevo inbound webhook processed successfully",
+        correlationId,
+        totalItems: result.totalItems,
+        processed: result.processed,
+        skipped: result.skipped,
+        failed: result.failed,
+        processingTime,
+        timestamp: new Date().toISOString(),
+      });
+
+      logger.info(
+        {
+          correlationId,
+          totalItems: result.totalItems,
+          processed: result.processed,
+          skipped: result.skipped,
+          failed: result.failed,
+          processingTime,
+        },
+        "Brevo inbound webhook processed successfully"
+      );
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+
+      logger.error(
+        {
+          correlationId,
+          error: error.message,
+          errorType: error.constructor.name,
+          processingTime,
+          stack: error.stack,
+        },
+        "Brevo inbound webhook processing failed"
+      );
+
+      // Send error response
+      if (error instanceof ValidationError) {
+        return sendErrorResponse(res, error, 400);
+      } else {
+        return sendErrorResponse(
+          res,
+          new BaseError("Internal server error processing inbound email"),
+          500
+        );
+      }
+    }
   })
 );
 

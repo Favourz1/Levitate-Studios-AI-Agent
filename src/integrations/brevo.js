@@ -55,7 +55,8 @@ class BrevoIntegration {
           const payload = {
             sender: {
               name: emailData?.senderName || "Levitate Studios",
-              email: emailData?.senderEmail || `noreply@${appConfig.emailDomain}`,
+              email:
+                emailData?.senderEmail || `noreply@${appConfig.emailDomain}`,
             },
             to: emailData.to.map((email) => ({ email })),
             subject: emailData.subject,
@@ -444,6 +445,68 @@ class BrevoIntegration {
       const duration = Date.now() - startTime;
       logIntegrationCall(logger, "Brevo", "getAccount", false, duration, error);
       throw new BrevoError("getAccount", error);
+    }
+  }
+
+  // Download inbound email attachment
+  async downloadInboundAttachment(downloadToken) {
+    const startTime = Date.now();
+
+    try {
+      const result = await retry(
+        async () => {
+          const url = `${this.baseUrl}/inbound/attachments/${downloadToken}`;
+          const headers = {
+            "api-key": this.apiKey,
+          };
+
+          const response = await fetch(url, {
+            method: "GET",
+            headers,
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(
+              `Brevo API error: ${response.status} ${response.statusText} - ${errorText}`
+            );
+          }
+
+          // Return the response as a buffer
+          const buffer = await response.arrayBuffer();
+          return {
+            buffer: Buffer.from(buffer),
+            contentType: response.headers.get("content-type"),
+            contentLength: response.headers.get("content-length"),
+          };
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Brevo",
+        "downloadInboundAttachment",
+        true,
+        duration
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Brevo",
+        "downloadInboundAttachment",
+        false,
+        duration,
+        error
+      );
+      throw new BrevoError("downloadInboundAttachment", error, {
+        downloadToken,
+      });
     }
   }
 }
