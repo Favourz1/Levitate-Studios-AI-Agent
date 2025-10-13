@@ -100,6 +100,48 @@ const ActionType = {
   REVIEW_DOCUMENT: "REVIEW_DOCUMENT",
 };
 
+// Asana Section Names for Pending Projects Board
+const AsanaPendingProjectsBoardSections = {
+  FILLED_QUESTIONNAIRE: "Filled Questionnaire",
+  BRAND_ORIGIN_DOC_PHASE: "Brand Origin Doc Phase",
+  BUDGET_TIMELINE_PHASE: "Budget/Timeline Phase",
+  FINALIZED: "Finalized",
+  REJECTED: "Rejected",
+};
+
+// Processing Status for questionnaire responses and other entities
+const ProcessingStatus = {
+  PENDING: "PENDING",
+  PROCESSED: "PROCESSED",
+  FAILED: "FAILED",
+};
+
+// System Project Names and Descriptions
+const SystemProjects = {
+  PENDING_PROJECTS_NAME: "Pending Projects",
+  PENDING_PROJECTS_DESCRIPTION:
+    "AI Agent managed project for pending client submissions",
+};
+
+// System Actor Names for audit logs
+const SystemActors = {
+  BRAND_ORIGIN_GENERATOR: "SYSTEM (Brand Origin Generator)",
+  LEVITATE_AI_AGENT_SYSTEM: "LEVITATE AI AGENT SYSTEM",
+};
+
+// Audit Log Actions
+const AuditActions = {
+  BRAND_ORIGIN_CREATED: "BRAND_ORIGIN_CREATED",
+  BRAND_ORIGIN_FAILED: "BRAND_ORIGIN_FAILED",
+  ASANA_WORKFLOW_FAILED: "ASANA_WORKFLOW_FAILED",
+  PM_ADMIN_NOTIFICATION_FAILED: "PM_ADMIN_NOTIFICATION_FAILED",
+};
+
+// System Email Addresses
+const SystemEmails = {
+  AI_AGENT: "ai-agent@levitate.ng",
+};
+
 module.exports = {
   ProjectPhase,
   DocumentType,
@@ -113,4 +155,10 @@ module.exports = {
   TeamRole,
   BrandAssets,
   ActionType,
+  AsanaPendingProjectsBoardSections,
+  ProcessingStatus,
+  SystemProjects,
+  SystemActors,
+  AuditActions,
+  SystemEmails,
 };

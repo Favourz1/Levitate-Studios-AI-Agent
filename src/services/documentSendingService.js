@@ -4,7 +4,7 @@ const { ValidationError, GoogleError, BaseError } = require("@/utils/errors");
 const { googleIntegration } = require("@/integrations/google");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
-const { DocumentStatus } = require("@/constants");
+const { DocumentStatus, SystemEmails } = require("@/constants");
 const { appConfig } = require("@/config");
 
 const logger = createLogger("service:document-sending");
@@ -316,7 +316,7 @@ class DocumentSendingService {
           data: {
             threadId: result.emailThread.id,
             direction: "OUTBOUND",
-            fromAddr: "ai-agent@levitate.ng",
+            fromAddr: SystemEmails.AI_AGENT,
             toAddr: result.client.primaryEmail,
             subject: clientEmailTemplate.subject,
             htmlBody: clientEmailTemplate.htmlContent,

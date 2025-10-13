@@ -1,6 +1,7 @@
 const { withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError } = require("@/utils/errors");
+const { ProcessingStatus } = require("@/constants");
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
@@ -261,7 +262,7 @@ class FormSubmissionService {
           respondentEmail: clientInfo.respondentEmail,
           submittedAt: new Date(parsedBody.timestamp),
           processedAt: new Date(),
-          processingStatus: "PROCESSED",
+          processingStatus: ProcessingStatus.PROCESSED,
           retryCount: 0,
           createdAt: new Date(),
           updatedAt: new Date(),

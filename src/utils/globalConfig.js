@@ -1,6 +1,7 @@
 const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError, BaseError } = require("@/utils/errors");
+const { AsanaPendingProjectsBoardSections } = require("@/constants");
 
 const logger = createLogger("utils:globalConfig");
 
@@ -45,11 +46,11 @@ const validateConfigValue = (key, value) => {
 
       // Validate required sections
       const requiredSections = [
-        "Filled Questionnaire",
-        "Brand Origin Doc Phase",
-        "Budget/Timeline Phase",
-        "Finalized",
-        "Rejected",
+        AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
+        AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
+        AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE,
+        AsanaPendingProjectsBoardSections.FINALIZED,
+        AsanaPendingProjectsBoardSections.REJECTED,
       ];
 
       for (const sectionName of requiredSections) {

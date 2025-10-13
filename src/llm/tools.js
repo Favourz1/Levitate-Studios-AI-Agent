@@ -8,6 +8,7 @@ const { QueueService } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ValidationError } = require("@/utils/errors");
 const { generateDedupeKey } = require("@/utils");
+const { DocumentStatus, ProjectPhase } = require("@/constants");
 
 const logger = createLogger("llm:tools");
 const prisma = getPrismaClient();
@@ -205,7 +206,7 @@ const writeDocumentTool = tool({
         data: {
           projectId,
           type: documentType,
-          status: "DRAFT",
+          status: DocumentStatus.DRAFT,
           driveFileId: googleDoc.id,
           isVariant,
           variantIndex,
@@ -293,7 +294,7 @@ const createDocumentVariantTool = tool({
             data: {
               projectId: baseDocument.projectId,
               type: "BUDGET_TIMELINE_VARIANT",
-              status: "DRAFT",
+              status: DocumentStatus.DRAFT,
               driveFileId: googleDoc.id,
               isVariant: true,
               variantIndex: index + 1,
@@ -444,11 +445,11 @@ const advanceProjectStateTool = tool({
   parameters: z.object({
     projectId: z.number().int().positive(),
     newPhase: z.enum([
-      "QUESTIONNAIRE",
-      "BRAND_ORIGIN",
-      "BUDGET_TIMELINE",
-      "FINALIZED",
-      "REJECTED",
+      ProjectPhase.QUESTIONNAIRE,
+      ProjectPhase.BRAND_ORIGIN,
+      ProjectPhase.BUDGET_TIMELINE,
+      ProjectPhase.FINALIZED,
+      ProjectPhase.REJECTED,
     ]),
     reason: z.string().max(500),
     actor: z.enum(["SYSTEM", "USER", "LLM"]).default("LLM"),

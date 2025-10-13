@@ -28,6 +28,11 @@ const {
   DocumentStatus,
   BrandAssets,
   ActionType,
+  AsanaPendingProjectsBoardSections,
+  ProcessingStatus,
+  SystemActors,
+  AuditActions,
+  SystemEmails,
 } = require("@/constants");
 
 /**
@@ -137,7 +142,7 @@ async function assembleProjectContext(projectId) {
       include: {
         client: true,
         questionnaireResponses: {
-          where: { processingStatus: "PROCESSED" },
+          where: { processingStatus: ProcessingStatus.PROCESSED },
           orderBy: { submittedAt: "desc" },
           take: 1,
         },
@@ -738,7 +743,7 @@ async function createDocumentRecords(
         data: {
           projectId,
           type: DocumentType.BRAND_ORIGIN,
-          status: "DRAFT", // Initially in draft until Google Doc is created
+          status: DocumentStatus.DRAFT, // Initially in draft until Google Doc is created
           driveFileId: null, // Will be updated after Google Doc creation
           isVariant: false,
           variantIndex: null,
@@ -901,8 +906,8 @@ async function createDocumentRecords(
       await tx.auditLog.create({
         data: {
           projectId,
-          actor: "SYSTEM (Brand Origin Generator)",
-          action: "BRAND_ORIGIN_CREATED",
+          actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+          action: AuditActions.BRAND_ORIGIN_CREATED,
           details: {
             documentId: documentRecord.document.id,
             googleDocId: googleDoc.id,
@@ -956,7 +961,7 @@ async function createDocumentRecords(
           await tx.document.update({
             where: { id: documentRecord.document.id },
             data: {
-              status: "DRAFT", // Keep in draft state on failure
+              status: DocumentStatus.DRAFT, // Keep in draft state on failure
               updatedAt: new Date(),
             },
           });
@@ -965,8 +970,8 @@ async function createDocumentRecords(
           await tx.auditLog.create({
             data: {
               projectId,
-              actor: "SYSTEM (Brand Origin Generator)",
-              action: "BRAND_ORIGIN_FAILED",
+              actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+              action: AuditActions.BRAND_ORIGIN_FAILED,
               details: {
                 documentId: documentRecord.document.id,
                 error: error.message,
@@ -1108,7 +1113,9 @@ async function updateAsanaWorkflow(context, documentResult, correlationId) {
 
     // Get the target section GID
     const brandOriginSectionGid =
-      pendingProjectsConfig.sections["Brand Origin Doc Phase"];
+      pendingProjectsConfig.sections[
+        AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE
+      ];
 
     if (!brandOriginSectionGid) {
       throw new AsanaError(
@@ -1121,7 +1128,7 @@ async function updateAsanaWorkflow(context, documentResult, correlationId) {
       );
     }
 
-    // Move task to "Brand Origin Doc Phase" section with all required parameters
+    // Move task to Brand Origin Doc Phase section with all required parameters
     await asanaIntegration.moveTaskToSection(
       asanaTask.taskGid, // taskGid
       pendingProjectsConfig.projectGid, // projectGid
@@ -1133,7 +1140,7 @@ async function updateAsanaWorkflow(context, documentResult, correlationId) {
       await prisma.asanaTask.update({
         where: { id: asanaTask.id },
         data: {
-          sectionName: "Brand Origin Doc Phase",
+          sectionName: AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
         },
       });
     } catch (updateError) {
@@ -1221,8 +1228,8 @@ ${
       await prisma.auditLog.create({
         data: {
           projectId: context.project.id,
-          actor: "SYSTEM (Brand Origin Generator)",
-          action: "ASANA_WORKFLOW_FAILED",
+          actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+          action: AuditActions.ASANA_WORKFLOW_FAILED,
           details: {
             error: error.message,
             errorType: error.constructor.name,
@@ -1452,7 +1459,7 @@ async function sendPMAdminNotificationEmail(
         data: {
           threadId: context.emailThread.id,
           direction: "OUTBOUND",
-          fromAddr: "ai-agent@levitate.ng",
+          fromAddr: SystemEmails.AI_AGENT,
           toAddr: pmUser.email,
           subject: emailTemplate.subject,
           htmlBody: emailTemplate.htmlContent,
@@ -1492,8 +1499,8 @@ async function sendPMAdminNotificationEmail(
       await prisma.auditLog.create({
         data: {
           projectId: context.project.id,
-          actor: "SYSTEM (Brand Origin Generator)",
-          action: "PM_ADMIN_NOTIFICATION_FAILED",
+          actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+          action: AuditActions.PM_ADMIN_NOTIFICATION_FAILED,
           details: {
             error: error.message,
             errorType: error.constructor.name,
@@ -1534,8 +1541,8 @@ async function markProjectGenerationFailed(
     await prisma.auditLog.create({
       data: {
         projectId,
-        actor: "SYSTEM (Brand Origin Generator)",
-        action: "BRAND_ORIGIN_FAILED",
+        actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+        action: AuditActions.BRAND_ORIGIN_FAILED,
         details: {
           error: errorMessage,
           correlationId,

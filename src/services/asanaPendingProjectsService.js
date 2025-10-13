@@ -3,7 +3,12 @@ const { getPrismaClient } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { asanaIntegration } = require("@/integrations/asana");
 const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
-const { TeamRole } = require("@/constants");
+const {
+  TeamRole,
+  AsanaPendingProjectsBoardSections,
+  SystemProjects,
+  SystemActors,
+} = require("@/constants");
 
 const logger = createLogger("service:asana-pending-projects");
 
@@ -27,11 +32,11 @@ class AsanaPendingProjectsService {
     }
 
     const requiredSections = [
-      "Filled Questionnaire",
-      "Brand Origin Doc Phase",
-      "Budget/Timeline Phase",
-      "Finalized",
-      "Rejected",
+      AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
+      AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
+      AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE,
+      AsanaPendingProjectsBoardSections.FINALIZED,
+      AsanaPendingProjectsBoardSections.REJECTED,
     ];
 
     return requiredSections.every((sectionName) => {
@@ -179,11 +184,11 @@ class AsanaPendingProjectsService {
 
               // Check if all required sections exist
               const requiredSections = [
-                "Filled Questionnaire",
-                "Brand Origin Doc Phase",
-                "Budget/Timeline Phase",
-                "Finalized",
-                "Rejected",
+                AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
+                AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
+                AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE,
+                AsanaPendingProjectsBoardSections.FINALIZED,
+                AsanaPendingProjectsBoardSections.REJECTED,
               ];
 
               const allSectionsExist = requiredSections.every((sectionName) => {
@@ -393,7 +398,7 @@ class AsanaPendingProjectsService {
       // Step 3: Create or recreate the Pending Projects board
       logger.info({ correlationId }, "Creating Pending Projects board");
 
-      const projectName = "Pending Projects";
+      const projectName = SystemProjects.PENDING_PROJECTS_NAME;
       const { appConfig } = require("@/config");
       const workspaceGid = appConfig.asana.workspaceGid;
 
@@ -406,7 +411,7 @@ class AsanaPendingProjectsService {
       try {
         project = await asanaIntegrationInstance.createProject(
           projectName,
-          "AI Agent managed project for pending client submissions",
+          SystemProjects.PENDING_PROJECTS_DESCRIPTION,
           null // Let the method auto-detect the team
         );
 
@@ -438,11 +443,11 @@ class AsanaPendingProjectsService {
 
       // Step 4: Create required sections
       const requiredSections = [
-        "Filled Questionnaire",
-        "Brand Origin Doc Phase",
-        "Budget/Timeline Phase",
-        "Finalized",
-        "Rejected",
+        AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
+        AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
+        AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE,
+        AsanaPendingProjectsBoardSections.FINALIZED,
+        AsanaPendingProjectsBoardSections.REJECTED,
       ];
 
       const sections = {};
@@ -737,14 +742,14 @@ class AsanaPendingProjectsService {
         throw new Error("Invalid email thread data provided");
       }
 
-      // Step 1: Ensure "Pending Projects" board exists
+      // Step 1: Ensure Pending Projects board exists
       const pendingBoard = await this.ensureAsanaPendingProjectsBoard();
 
       // Step 2: Get PM user GID
       const pmUser = await this.getPMUser();
       const pmUserGid = pmUser?.asanaUserGid;
 
-      // Step 3: Create task in "Filled Questionnaire" section
+      // Step 3: Create task in Filled Questionnaire section
       const taskName = `${client.name} - ${project.name}`;
       const submissionDate = new Date();
       const formattedDate = submissionDate.toLocaleString("en-NG", {
@@ -775,7 +780,9 @@ class AsanaPendingProjectsService {
 Reply-to address for client communication: ${emailThread.replyToAddress}`;
 
       const filledQuestionnaireSection =
-        pendingBoard.sections["Filled Questionnaire"];
+        pendingBoard.sections[
+          AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE
+        ];
 
       const asanaTask = await asanaIntegration.createTask(
         taskName,
@@ -822,11 +829,11 @@ Reply-to address for client communication: ${emailThread.replyToAddress}`;
           projectId: project.id,
           asanaLinkId: asanaLink.id,
           taskGid: asanaTask.gid,
-          sectionName: "Filled Questionnaire",
+          sectionName: AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
           assigneeGid: pmUserGid,
           meta: {
             taskName,
-            createdBy: "LEVITATE AI AGENT SYSTEM",
+            createdBy: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
             correlationId,
           },
           createdAt: new Date(),

@@ -2,7 +2,7 @@ const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { createActionToken, generateDedupeKey } = require("@/utils");
-const { TeamRole } = require("@/constants");
+const { TeamRole, JobStatus } = require("@/constants");
 
 const logger = createLogger("service:action");
 const prisma = getPrismaClient();
@@ -176,7 +176,7 @@ class ActionService {
             actionData,
             executedAt: new Date().toISOString(),
           },
-          status: "SUCCEEDED",
+          status: JobStatus.SUCCEEDED,
           dedupeKey: nonce,
           attempts: 1,
           startedAt: new Date(),
