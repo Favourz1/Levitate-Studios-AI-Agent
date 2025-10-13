@@ -207,7 +207,7 @@ C) **UI native form** → API same as (A).
   - **ACCEPT** → proceed to Step 5.
   - **OFFTOPIC/OTHER** → log thread and do nothing (comment PM).
 
-- Every regeneration produces a new `document_revision` and fresh Drive head; keep DB snapshots authoritative.
+- Every regeneration produces a new `document` / `document_revision` and fresh Drive head; keep DB snapshots authoritative.
 
 ### Step 5 — Accept Brand Origin → Budget/Timeline creation
 
@@ -263,7 +263,7 @@ C) **UI native form** → API same as (A).
 **Tools exposed to the agent, feel free to add if no one caters for your needs yet - but update the list here.**
 
 - `readProjectContext(projectId)` - Gets client.context + project.context + project metadata
-- `readQuestionnaireResponses(projectId)` - **NEW** - Gets all questionnaire responses for project with structured parsing
+- `readQuestionnaireResponses(projectId)` - Gets all questionnaire responses for project with structured parsing
 - `readSnapshots(documentId)` - Gets document revision history
 - `writeDoc(type, content)` - Creates/updates documents in Google Drive + DB
 - `createVariant(...)` - Creates document variants (Budget/Timeline only)
@@ -287,7 +287,7 @@ C) **UI native form** → API same as (A).
 
 **Job scheduler**
 
-- Use BullMQ **Job Schedulers** (v5.16+) for cron-like tasks (e.g., stale job rechecks, Drive export sweeps). ([docs.bullmq.io][7])
+- Use BullMQ **Job Schedulers** (v5.58+) for cron-like tasks (e.g., stale job rechecks, Drive export sweeps). ([docs.bullmq.io][7])
 
 **Reliability settings**
 
@@ -328,7 +328,10 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 13) Admin/Manager UI (frontend)
+## 13) Admin/Manager/PM UI (frontend)
+
+- Admin can set functionalities that PM and manager can access from UI.
+
 
 **Screens**
 
@@ -423,9 +426,17 @@ C) **UI native form** → API same as (A).
 
 11. **LLM failures during brand origin creation**:
 
+    - **Token check middleware**: 
+      - Before processing queued docs, check available token balance with provider
+      - If tokens below threshold (configurable in global_configs), notify admin with button to manaually retry when token replenished and skip processing
+      - Re-queue skipped docs with exponential backoff once tokens replenished
     - **API errors**: Retry with exponential backoff; escalate to PM after 3 failures
     - **Invalid output**: Validate LLM response structure; regenerate if malformed
     - **Context too large**: Summarize questionnaire responses before sending to LLM
+    - **Cost optimization**:
+      - Track token usage per document generation
+      - Cache common responses/patterns to reduce redundant LLM calls
+      - Implement token budget per project phase
 
 12. **Google Drive integration failures**:
     - **Quota exceeded**: Queue for retry when quota resets; notify admin
