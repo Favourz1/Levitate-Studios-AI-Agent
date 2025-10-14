@@ -70,6 +70,7 @@ model Document {
   status            String   // DRAFT, PM_REVIEW, SENT_TO_CLIENT, CLIENT_FEEDBACK, ACCEPTED, REJECTED
   driveFileId       String?  @map("drive_file_id")
   currentRevisionId Int?     @map("current_revision_id")
+  lastSentRevisionId Int?    @map("last_sent_revision_id")
   isVariant         Boolean  @default(false) @map("is_variant")
   variantIndex      Int?     @map("variant_index")
   createdAt         DateTime @default(now()) @map("created_at")
@@ -79,6 +80,7 @@ model Document {
   project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   revisions         DocumentRevision[]
   currentRevision   DocumentRevision? @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
+  lastSentRevision  DocumentRevision? @relation("LastSentRevision", fields: [lastSentRevisionId], references: [id])
 
   @@map("documents")
 }
@@ -96,6 +98,7 @@ model DocumentRevision {
   // Relations
   document         Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
   currentDocuments Document[] @relation("CurrentRevision")
+  lastSentDocuments Document[] @relation("LastSentRevision")
 
   @@map("document_revisions")
 }

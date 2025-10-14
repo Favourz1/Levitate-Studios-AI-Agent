@@ -3,6 +3,7 @@ const { createLogger } = require("@/utils/logger");
 const { llmClient } = require("@/llm/client");
 const { z } = require("zod");
 const { ValidationError, LLMError } = require("@/utils/errors");
+const { googleIntegration } = require("@/integrations/google");
 const {
   EmailIntent,
   DocumentStatus,
@@ -49,6 +50,7 @@ async function assembleIntentContext(emailId) {
                   take: 1,
                   include: {
                     currentRevision: true,
+                    lastSentRevision: true,
                   },
                 },
                 questionnaireResponses: {
@@ -80,9 +82,136 @@ async function assembleIntentContext(emailId) {
     }
 
     const project = email.thread.project;
-    // TODO: Use google api from google.js to fetch latest content of the docuemnt and update the snapshot text of the current revision
     const currentDocument = project.documents[0] || null;
     const conversationHistory = email.thread.emails || [];
+
+    // Get the content that was actually sent to the client
+    let sentDocumentContent = null;
+    let sentContentSource = "none";
+
+    if (currentDocument?.lastSentRevision) {
+      const lastSentRevision = currentDocument.lastSentRevision;
+
+      // Check if this is a PDF revision with source revision
+      const snapshotMd = lastSentRevision.snapshotMd;
+      const hasPdfFileId = snapshotMd?.pdfFileId;
+      const sourceRevisionId = snapshotMd?.sourceRevisionId;
+
+      if (hasPdfFileId && sourceRevisionId) {
+        // This is a PDF revision - get content from source revision
+        try {
+          const sourceRevision = await prisma.documentRevision.findUnique({
+            where: { id: sourceRevisionId },
+          });
+
+          if (sourceRevision?.snapshotText) {
+            sentDocumentContent = sourceRevision.snapshotText;
+            sentContentSource = "source_revision";
+
+            logger.info(
+              {
+                emailId,
+                documentId: currentDocument.id,
+                lastSentRevisionId: lastSentRevision.id,
+                sourceRevisionId,
+              },
+              "Using source revision content for PDF-based sent document"
+            );
+          } else {
+            // Source revision not found or has no content - fallback to Google Drive
+            logger.warn(
+              {
+                emailId,
+                documentId: currentDocument.id,
+                sourceRevisionId,
+              },
+              "Source revision not found or empty, fetching from Google Drive"
+            );
+
+            if (currentDocument.driveFileId) {
+              sentDocumentContent =
+                await googleIntegration.exportDocumentAsText(
+                  currentDocument.driveFileId
+                );
+              sentContentSource = "google_drive_fallback";
+            }
+          }
+        } catch (error) {
+          logger.error(
+            {
+              emailId,
+              documentId: currentDocument.id,
+              sourceRevisionId,
+              error: error.message,
+            },
+            "Failed to get source revision content, trying Google Drive fallback"
+          );
+
+          // Final fallback to Google Drive
+          if (currentDocument.driveFileId) {
+            try {
+              sentDocumentContent =
+                await googleIntegration.exportDocumentAsText(
+                  currentDocument.driveFileId
+                );
+              sentContentSource = "google_drive_error_fallback";
+            } catch (driveError) {
+              logger.error(
+                {
+                  emailId,
+                  documentId: currentDocument.id,
+                  driveError: driveError.message,
+                },
+                "Failed to get content from Google Drive, using last sent revision snapshot"
+              );
+              sentDocumentContent = lastSentRevision.snapshotText;
+              sentContentSource = "last_sent_snapshot_fallback";
+            }
+          } else {
+            sentDocumentContent = lastSentRevision.snapshotText;
+            sentContentSource = "last_sent_snapshot_no_drive";
+          }
+        }
+      } else if (!hasPdfFileId && !sourceRevisionId) {
+        // This is a regular Google Docs revision (edge case)
+        sentDocumentContent = lastSentRevision.snapshotText;
+        sentContentSource = "google_docs_revision";
+
+        logger.info(
+          {
+            emailId,
+            documentId: currentDocument.id,
+            lastSentRevisionId: lastSentRevision.id,
+          },
+          "Using Google Docs revision content (edge case)"
+        );
+      } else {
+        // Partial metadata - handle gracefully
+        logger.warn(
+          {
+            emailId,
+            documentId: currentDocument.id,
+            hasPdfFileId,
+            hasSourceRevisionId: !!sourceRevisionId,
+          },
+          "Incomplete revision metadata, using snapshot text"
+        );
+        sentDocumentContent = lastSentRevision.snapshotText;
+        sentContentSource = "incomplete_metadata_fallback";
+      }
+    } else if (currentDocument?.currentRevision) {
+      // No last sent revision - use current revision (shouldn't happen in normal flow)
+      sentDocumentContent = currentDocument.currentRevision.snapshotText;
+      sentContentSource = "current_revision_fallback";
+
+      logger.warn(
+        {
+          emailId,
+          documentId: currentDocument.id,
+        },
+        "No last sent revision found, using current revision (unusual case)"
+      );
+    }
 
     logger.info(
       {
@@ -91,6 +220,8 @@ async function assembleIntentContext(emailId) {
         projectPhase: project.phase,
         hasCurrentDocument: !!currentDocument,
         conversationHistoryLength: conversationHistory.length,
+        sentContentSource,
+        sentContentLength: sentDocumentContent?.length || 0,
       },
       "Intent context assembled successfully"
     );
@@ -120,6 +251,9 @@ async function assembleIntentContext(emailId) {
             type: currentDocument.type,
             status: currentDocument.status,
             content: currentDocument.currentRevision?.snapshotText || null,
+            sentContent: sentDocumentContent,
+            sentContentSource,
+            lastSentRevisionId: currentDocument.lastSentRevisionId,
           }
         : null,
       conversationHistory: conversationHistory.map((e) => ({
@@ -290,9 +424,13 @@ function buildIntentDetectionPrompt(context) {
     ? `
 Current Document Type: ${context.currentDocument.type}
 Document Status: ${context.currentDocument.status}
-Document Summary: ${
-        context.currentDocument.content?.substring(0, 500) || "Not available"
-      }${context.currentDocument.content?.length > 500 ? "..." : ""}
+Content Sent to Client: ${
+        context.currentDocument.sentContent?.substring(0, 800) ||
+        "Not available"
+      }${context.currentDocument.sentContent?.length > 800 ? "..." : ""}
+Latest Content (may differ from sent): ${
+        context.currentDocument.content?.substring(0, 300) || "Not available"
+      }${context.currentDocument.content?.length > 300 ? "..." : ""}
 `
     : "No document currently being reviewed";
 

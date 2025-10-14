@@ -329,7 +329,7 @@ class DocumentSendingService {
         }
 
         // Create document revision for PDF
-        await tx.documentRevision.create({
+        const pdfRevision = await tx.documentRevision.create({
           data: {
             documentId: documentId,
             driveRevisionId: pdfFile.id, // Store PDF file ID as revision
@@ -340,10 +340,21 @@ class DocumentSendingService {
               pdfSize: pdfFile.size,
               sourceRevisionId: result.document.currentRevisionId, // Track source revision
               exportedAt: new Date().toISOString(),
+              sentToClient: true,
+              clientEmail: result.client.primaryEmail,
             },
             summary: `Document exported as PDF and sent to client: ${result.client.primaryEmail}`,
             createdBy: "SYSTEM",
             createdAt: new Date(),
+          },
+        });
+
+        // Update document to track the last sent revision (PDF revision)
+        await tx.document.update({
+          where: { id: documentId },
+          data: {
+            lastSentRevisionId: pdfRevision.id,
+            updatedAt: new Date(),
           },
         });
         // Log outbound email in database

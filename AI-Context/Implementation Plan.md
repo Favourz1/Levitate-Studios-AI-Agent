@@ -51,7 +51,7 @@ For enums listed here don't add in db level, let it be in backend level and vali
 - **projects**: id, client_id, name, phase(enum: QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED), asana_project_gid (nullable until Step 7), created_at, updated_at
 - **project_phase_log**: id, project_id, from_phase, to_phase, reason, actor(enum: SYSTEM|USER|LLM), at
 - **questionnaire_responses**: id, project_id, form_id, response_id, responses(JSONB), respondent_email, submitted_at, processed_at, processing_status(enum: PENDING|PROCESSED|FAILED), error_message(TEXT), retry_count, created_at, updated_at
-- **documents**: id, project_id, type(enum: BRAND_ORIGIN|BUDGET_TIMELINE|BUDGET_TIMELINE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), is_variant(bool), variant_index(int|null), created_at, updated_at
+- **documents**: id, project_id, type(enum: BRAND_ORIGIN|BUDGET_TIMELINE|BUDGET_TIMELINE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), last_sent_revision_id (FK to document_revisions), is_variant(bool), variant_index(int|null), created_at, updated_at
 - **document_revisions**: id, document_id, drive_revision_id(nullable), snapshot_text(TEXT, gzip/base64), snapshot_md(JSONB optional), created_by(enum: AGENT|PM|FINANCE|CLIENT), created_at
 - **email_threads**: id, project_id, client_id, reply_to_address, provider_thread_id (Brevo/Message-Id), created_at
 - **emails**: id, thread_id, direction(enum: INBOUND|OUTBOUND), from_addr, to_addr, subject, raw_headers(JSONB), text_body(TEXT), html_body(TEXT), attachments_meta(JSONB), brevo_event_id, received_at, intent(enum: NONE|DOC_FEEDBACK|ACCEPT|REJECT|OFFTOPIC|OTHER), intent_confidence(NUMERIC), llm_trace_id, processed(bool)
@@ -198,10 +198,14 @@ C) **UI native form** → API same as (A).
   - Set status SENT_TO_CLIENT; send Brevo email to client with **unique reply-to** like `clients-<CLIENT_ID>-<PROJECT_ID>@levitate.ng` (configure domain in Brevo; inbound route hits our webhook). ([developers.brevo.com][3])
   - Store outbound email in `emails` with provider ids; upsert `email_thread`.
 
-### Step 4 — Inbound replies (intent loop)
+### Step 4 — Inbound replies (intent loop with accurate content tracking)
 
 - Brevo webhook posts parsed email + attachments to our endpoint → enqueue `EMAIL_PARSE`. ([developers.brevo.com][3])
-- LLM classification (structured JSON): {intent, summary, requested_changes}.
+- **Enhanced Context Assembly**: Get the exact content that was sent to client via `lastSentRevisionId`:
+  - If PDF revision: Extract content from `sourceRevisionId` (the actual document content sent)
+  - If Google Docs revision: Use `snapshotText` directly (edge case)
+  - Fallbacks: Google Drive export if source revision missing, then last sent snapshot
+- LLM classification (structured JSON): {intent, summary, requested_changes} using the exact sent content for accurate analysis.
 
   - **DOC_FEEDBACK** → status=CLIENT_FEEDBACK → enqueue regeneration job; add comment in Asana; email PM.
   - **ACCEPT** → proceed to Step 5.
@@ -243,12 +247,18 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 7) Document strategy (Google Drive + DB snapshots)
+## 7) Document strategy (Google Drive + DB snapshots + Last Sent Tracking)
 
 - **Primary artifact**: Google Doc (collab-friendly).
 - **Immutable history**: Store **normalized text snapshots** per revision in `document_revisions`.
-- **Why**: Drive `keepForever` is for **binary** blobs; not reliable for Docs editors content. We therefore keep our own authoritative history and optionally duplicate Docs for “pinned” milestones if required. ([Google for Developers][15])
-- **AI context**: Pull latest snapshot text + metadata; **do not** fetch live Doc in long chains to avoid quota/latency; re-sync when saving.
+- **Last Sent Tracking**: Track `lastSentRevisionId` on documents to identify exactly what content was sent to clients for accurate feedback processing.
+- **PDF Workflow**: When sending to clients, we export as PDF and create a PDF revision that references the source revision via `sourceRevisionId` in `snapshotMd`.
+- **Intent Detection**: For email intent analysis, we use the `lastSentRevision` to get the exact content the client received:
+  - If PDF revision: Get content from `sourceRevisionId` revision (the actual document content)
+  - If Google Docs revision: Use `snapshotText` directly (edge case)
+  - Fallbacks: Google Drive export if source revision missing, then last sent snapshot
+- **Why**: Drive `keepForever` is for **binary** blobs; not reliable for Docs editors content. We therefore keep our own authoritative history and track what was actually sent to clients for accurate feedback processing and optionally duplicate Docs for “pinned” milestones if required. ([Google for Developers][15])
+- **AI context**: Pull content from last sent revision's source for feedback analysis; **do not** fetch live Doc in long chains to avoid quota/latency; re-sync when saving.
 - **Merge model**: If PM edits the live Google Doc, we **export** (text/HTML) and save a new `document_revision` with diff summary (LLM generated) for audit trail.
 
 ---
@@ -331,7 +341,6 @@ C) **UI native form** → API same as (A).
 ## 13) Admin/Manager/PM UI (frontend)
 
 - Admin can set functionalities that PM and manager can access from UI.
-
 
 **Screens**
 
@@ -426,7 +435,7 @@ C) **UI native form** → API same as (A).
 
 11. **LLM failures during brand origin creation**:
 
-    - **Token check middleware**: 
+    - **Token check middleware**:
       - Before processing queued docs, check available token balance with provider
       - If tokens below threshold (configurable in global_configs), notify admin with button to manaually retry when token replenished and skip processing
       - Re-queue skipped docs with exponential backoff once tokens replenished
