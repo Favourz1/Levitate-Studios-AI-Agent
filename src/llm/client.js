@@ -361,7 +361,7 @@ class LLMClient {
 
   // Build system prompt based on task type
   buildSystemPrompt(taskType, context) {
-    const basePrompt = `You are an AI assistant for Levitate Studios, a creative agency that provides services including logo design, web design, packaging design, motion graphics, and advertising.
+    const basePrompt = `You are an AI assistant for Levitate Studios, a creative agency that provides services including logo design, web design, packaging design, motion graphics, and advertising etc.
 
 Current date: ${new Date().toISOString().split("T")[0]}
 

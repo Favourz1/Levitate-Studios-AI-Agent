@@ -8,6 +8,7 @@ const asanaPendingProjectsService = require("@/services/asanaPendingProjectsServ
 const emailTemplateService = require("@/services/emailTemplateService");
 const actionService = require("@/services/actionService");
 const documentSendingService = require("@/services/documentSendingService");
+const intentPromptService = require("@/services/intentPromptService");
 
 module.exports = {
   ...projectService,
@@ -20,4 +21,5 @@ module.exports = {
   ...emailTemplateService,
   ...actionService,
   ...documentSendingService,
+  ...intentPromptService,
 };

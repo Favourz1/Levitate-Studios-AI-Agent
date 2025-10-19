@@ -135,6 +135,7 @@ model Email {
   receivedAt        DateTime @default(now()) @map("received_at")
   intent            String?  // NONE, DOC_FEEDBACK, ACCEPT, REJECT, OFFTOPIC, OTHER
   intentConfidence  Decimal? @map("intent_confidence") @db.Decimal(5, 4)
+  intentMetadata    Json?    @map("intent_metadata") @db.JsonB // Complete intent analysis results
   llmTraceId        String?  @map("llm_trace_id")
   processed         Boolean  @default(false)
 

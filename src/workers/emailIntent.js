@@ -4,6 +4,7 @@ const { llmClient } = require("@/llm/client");
 const { z } = require("zod");
 const { ValidationError, LLMError } = require("@/utils/errors");
 const { googleIntegration } = require("@/integrations/google");
+const { IntentPromptService } = require("@/services/intentPromptService");
 const {
   EmailIntent,
   DocumentStatus,
@@ -39,11 +40,7 @@ async function assembleIntentContext(emailId) {
                 documents: {
                   where: {
                     status: {
-                      in: [
-                        DocumentStatus.PM_REVIEW,
-                        DocumentStatus.SENT_TO_CLIENT,
-                        DocumentStatus.CLIENT_FEEDBACK,
-                      ],
+                      in: [DocumentStatus.SENT_TO_CLIENT],
                     },
                   },
                   orderBy: { updatedAt: "desc" },
@@ -307,10 +304,15 @@ async function detectEmailIntent(context) {
       conversationLength: context.conversationHistory.length,
     };
 
-    // Build prompt for intent detection
-    const prompt = buildIntentDetectionPrompt(context);
+    // Build unified prompt with type-specific awareness and preserved client context
+    const basePrompt = buildIntentDetectionPrompt(context);
+    const unifiedPrompt = await IntentPromptService.generateIntentPrompt(
+      basePrompt,
+      context.currentDocument?.type,
+      context
+    );
 
-    // Define intent schema
+    // Define enhanced intent schema with document-type awareness
     const intentSchema = z.object({
       intent: z.enum([
         EmailIntent.DOC_FEEDBACK,
@@ -329,15 +331,31 @@ async function detectEmailIntent(context) {
         .max(1000)
         .describe("Brief summary of the email content and intent"),
       requestedChanges: z
-        .array(z.string())
+        .array(
+          z.object({
+            section: z
+              .string()
+              .optional()
+              .describe("Specific document section affected"),
+            change: z.string().describe("Description of the requested change"),
+            priority: z
+              .enum(["high", "medium", "low"])
+              .optional()
+              .describe("Priority level of the change"),
+            feasibility: z
+              .enum(["easy", "moderate", "complex"])
+              .optional()
+              .describe("Estimated complexity of implementing the change"),
+          })
+        )
         .optional()
         .describe(
-          "List of specific changes requested (only for DOC_FEEDBACK intent)"
+          "Structured list of specific changes requested (only for DOC_FEEDBACK intent)"
         ),
       reasoning: z
         .string()
-        .max(1000)
-        .describe("Explanation for the detected intent"),
+        .max(1500)
+        .describe("Detailed explanation for the detected intent and analysis"),
       requiresAction: z
         .boolean()
         .describe("Whether this email requires system action"),
@@ -345,16 +363,60 @@ async function detectEmailIntent(context) {
         .string()
         .optional()
         .describe("Suggested action to take if requiresAction is true"),
+      documentTypeAnalysis: z
+        .object({
+          structuralImpact: z
+            .string()
+            .optional()
+            .describe("How changes affect document structure"),
+          sectionReferences: z
+            .array(z.string())
+            .optional()
+            .describe("Document sections mentioned in feedback"),
+          complianceCheck: z
+            .boolean()
+            .optional()
+            .describe("Whether changes comply with document type requirements"),
+          implementationNotes: z
+            .string()
+            .optional()
+            .describe(
+              "Notes on implementing changes within document framework"
+            ),
+        })
+        .optional()
+        .describe("Document-type specific analysis"),
+      clientSentiment: z
+        .enum(["positive", "neutral", "negative", "mixed"])
+        .optional()
+        .describe("Overall sentiment of the client's feedback"),
+      urgency: z
+        .enum(["low", "medium", "high", "urgent"])
+        .optional()
+        .describe("Urgency level based on client's language and tone"),
     });
 
-    // Call LLM for structured intent detection
+    // Call LLM for structured intent detection with unified prompt
     const intentResult = await llmClient.generateStructured(
       intentSchema,
-      prompt,
-      systemContext,
+      unifiedPrompt,
+      {
+        ...systemContext,
+        intentType: context.currentDocument?.type,
+        hasTypeContext: !!context.currentDocument?.type,
+      },
       "classification"
     );
     console.log("intentResult", intentResult);
+
+    logger.debug(
+      {
+        emailId: context.email.id,
+        documentType: context.currentDocument?.type,
+        intentResultKeys: Object.keys(intentResult.data || {}),
+      },
+      "Intent detection result received"
+    );
 
     logger.info(
       {
@@ -375,8 +437,16 @@ async function detectEmailIntent(context) {
       reasoning: intentResult.data.reasoning,
       requiresAction: intentResult.data.requiresAction,
       suggestedAction: intentResult.data.suggestedAction || null,
+      documentTypeAnalysis: intentResult.data.documentTypeAnalysis || null,
+      clientSentiment: intentResult.data.clientSentiment || null,
+      urgency: intentResult.data.urgency || null,
       traceId: intentResult.traceId,
       tokenUsage: intentResult.tokenUsage,
+      metadata: {
+        intentType: context.currentDocument?.type,
+        sentContentSource: context.currentDocument?.sentContentSource,
+        analysisTimestamp: new Date().toISOString(),
+      },
     };
   } catch (error) {
     logger.error(
@@ -425,12 +495,11 @@ function buildIntentDetectionPrompt(context) {
 Current Document Type: ${context.currentDocument.type}
 Document Status: ${context.currentDocument.status}
 Content Sent to Client: ${
-        context.currentDocument.sentContent?.substring(0, 800) ||
-        "Not available"
-      }${context.currentDocument.sentContent?.length > 800 ? "..." : ""}
+        context.currentDocument.sentContent || "Not available"
+      }
 Latest Content (may differ from sent): ${
-        context.currentDocument.content?.substring(0, 300) || "Not available"
-      }${context.currentDocument.content?.length > 300 ? "..." : ""}
+        context.currentDocument.content || "Not available"
+      }
 `
     : "No document currently being reviewed";
 
@@ -515,18 +584,19 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
       "Handling detected intent"
     );
 
-    // Update email record with detected intent
+    // Update email record with detected intent and complete metadata
     await prisma.email.update({
       where: { id: email.id },
       data: {
         intent,
         intentConfidence: intentResult.confidence,
+        intentMetadata: intentResult,
         llmTraceId: intentResult.traceId,
         processed: true,
       },
     });
 
-    // Create audit log for intent detection
+    // Create audit log for intent detection with enhanced details
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
@@ -539,11 +609,18 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
           summary: intentResult.summary,
           requiresAction,
           suggestedAction: intentResult.suggestedAction,
+          requestedChangesCount: intentResult.requestedChanges?.length || 0,
+          documentType: context.currentDocument?.type,
+          clientSentiment: intentResult.clientSentiment,
+          urgency: intentResult.urgency,
+          hasDocumentTypeAnalysis: !!intentResult.documentTypeAnalysis,
           correlationId,
         },
         at: new Date(),
       },
     });
+
+    // TODO: Any intent that the *intentResult.confidence* is less then 0.7 send to admin and PM and they manyally confirm - dont take automatic action
 
     // If no action required, we're done
     if (!requiresAction) {
@@ -561,7 +638,6 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
         message: "No action required",
       };
     }
-
     // Handle different intents
     switch (intent) {
       case EmailIntent.DOC_FEEDBACK:
@@ -576,6 +652,11 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
 
       case EmailIntent.REJECT:
         return await handleRejectIntent(context, intentResult, correlationId);
+
+      case EmailIntent.OFFTOPIC:
+      case EmailIntent.OTHER:
+        // TODO: Send to admin and PM for confirmation if ai agent got it right and they can manually select right intent via email/ui
+        return;
 
       default:
         logger.info(
@@ -623,6 +704,9 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
         projectId: project.id,
         documentId: currentDocument?.id,
         requestedChangesCount: intentResult.requestedChanges?.length || 0,
+        documentType: currentDocument?.type,
+        clientSentiment: intentResult.clientSentiment,
+        urgency: intentResult.urgency,
         correlationId,
       },
       "Handling DOC_FEEDBACK intent"
@@ -654,7 +738,7 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
       },
     });
 
-    // Create audit log
+    // Create audit log with enhanced feedback details
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
@@ -666,6 +750,10 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
           documentType: currentDocument.type,
           summary: intentResult.summary,
           requestedChanges: intentResult.requestedChanges || [],
+          clientSentiment: intentResult.clientSentiment,
+          urgency: intentResult.urgency,
+          documentTypeAnalysis: intentResult.documentTypeAnalysis,
+          reasoning: intentResult.reasoning,
           correlationId,
         },
         at: new Date(),
@@ -992,9 +1080,101 @@ const emailIntentProcessor = async (job) => {
   }
 };
 
+/**
+ * Retrieve complete intent metadata for document regeneration
+ * @param {number} emailId - Email ID to get intent metadata for
+ * @returns {Promise<Object|null>} Complete intent metadata or null if not found
+ */
+async function getIntentMetadataForRegeneration(emailId) {
+  try {
+    const email = await prisma.email.findUnique({
+      where: { id: emailId },
+      select: {
+        id: true,
+        intent: true,
+        intentConfidence: true,
+        intentMetadata: true,
+        fromAddr: true,
+        subject: true,
+        textBody: true,
+        receivedAt: true,
+        thread: {
+          select: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+                client: {
+                  select: {
+                    name: true,
+                    primaryEmail: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!email || !email.intentMetadata) {
+      logger.warn(
+        {
+          emailId,
+          hasEmail: !!email,
+          hasIntentMetadata: !!email?.intentMetadata,
+        },
+        "No intent metadata found for email"
+      );
+      return null;
+    }
+
+    logger.info(
+      {
+        emailId,
+        intent: email.intent,
+        confidence: email.intentConfidence,
+        hasRequestedChanges: !!email.intentMetadata?.requestedChanges?.length,
+        documentType: email.intentMetadata?.metadata?.documentType,
+      },
+      "Retrieved intent metadata for document regeneration"
+    );
+
+    return {
+      emailId: email.id,
+      intent: email.intent,
+      confidence: email.intentConfidence,
+      metadata: email.intentMetadata,
+      clientInfo: {
+        email: email.fromAddr,
+        name: email.thread?.project?.client?.name,
+      },
+      projectInfo: {
+        id: email.thread?.project?.id,
+        name: email.thread?.project?.name,
+      },
+      emailInfo: {
+        subject: email.subject,
+        textBody: email.textBody,
+        receivedAt: email.receivedAt,
+      },
+    };
+  } catch (error) {
+    logger.error(
+      {
+        emailId,
+        error: error.message,
+      },
+      "Failed to retrieve intent metadata for regeneration"
+    );
+    throw error;
+  }
+}
+
 module.exports = {
   emailIntentProcessor,
   assembleIntentContext,
   detectEmailIntent,
   handleDetectedIntent,
+  getIntentMetadataForRegeneration,
 };
