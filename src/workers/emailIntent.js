@@ -742,8 +742,8 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
-        actor: `CLIENT (${email.from})`,
-        action: "DOCUMENT_FEEDBACK_RECEIVED",
+        actor: `CLIENT (${email.from}) - DETECTED INTENT`,
+        action: AuditActions.DOCUMENT_FEEDBACK_RECEIVED,
         details: {
           emailId: email.id,
           documentId: currentDocument.id,
@@ -847,7 +847,7 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
-        actor: `CLIENT (${email.from})`,
+        actor: `CLIENT (${email.from}) - DETECTED INTENT`,
         action: "DOCUMENT_ACCEPTED",
         details: {
           emailId: email.id,
@@ -933,7 +933,7 @@ async function handleRejectIntent(context, intentResult, correlationId) {
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
-        actor: `CLIENT (${email.from})`,
+        actor: `CLIENT (${email.from}) - DETECTED INTENT`,
         action: "DOCUMENT_REJECTED",
         details: {
           emailId: email.id,
