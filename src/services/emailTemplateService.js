@@ -481,10 +481,10 @@ class EmailTemplateService {
               </div>
 
               <div style="text-align: center; margin: 30px 0;">
-                <a href="${reviewUrl}" class="btn btn-primary">
+                <a href="${reviewUrl}" class="btn btn-primary" style="color: white;">
                   <span class="icon">🔍</span>Review Regenerated Document
                 </a>
-                <a href="${sendToClientUrl}" class="btn btn-success">
+                <a href="${sendToClientUrl}" class="btn btn-success" style="color: white;">
                   <span class="icon">📧</span>Send to Client
                 </a>
               </div>

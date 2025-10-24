@@ -155,7 +155,19 @@ class EmailInboundService {
         }
       }
 
-      // If not found in To, check Recipients (RCPT TO)
+      // If not found in To, check Cc addresses
+      if (!matchedAlias && Array.isArray(item.Cc)) {
+        for (const ccItem of item.Cc) {
+          const alias = this.extractEmailAlias(ccItem.Address);
+          if (alias) {
+            matchedAlias = alias;
+            matchedToAddress = ccItem.Address;
+            break;
+          }
+        }
+      }
+
+      // If not found in To or Cc, check Recipients (RCPT TO)
       if (!matchedAlias && Array.isArray(item.Recipients)) {
         for (const recipient of item.Recipients) {
           const alias = this.extractEmailAlias(recipient);
@@ -173,6 +185,8 @@ class EmailInboundService {
           {
             messageId: item.MessageId,
             toAddresses: item.To?.map((t) => t.Address),
+            ccAddresses: item.Cc?.map((c) => c.Address),
+            recipientAddresses: item.Recipients,
             correlationId,
           },
           "No matching reply-to address found in email - skipping"
