@@ -47,7 +47,7 @@ const {
  */
 const brandOriginGenerationProcessor = async (job) => {
   const startTime = Date.now();
-  const { projectId, dedupeKey, correlationId } = job.data;
+  const { projectId, dedupeKey, correlationId, feedbackContext } = job.data;
 
   logger.info(
     {
@@ -55,33 +55,53 @@ const brandOriginGenerationProcessor = async (job) => {
       projectId,
       dedupeKey,
       correlationId,
+      isRegeneration: !!feedbackContext,
+      feedbackEmailId: feedbackContext?.emailId,
     },
-    "Starting brand origin document generation"
+    feedbackContext
+      ? "Starting brand origin document regeneration"
+      : "Starting brand origin document generation"
   );
 
   try {
     // Step 1: Assemble context from database
     const context = await assembleProjectContext(projectId);
 
-    // Step 2: Generate brand origin document using LLM
-    const brandOriginDocument = await generateBrandOriginWithLLM(context);
-
-    // Step 3: Create Google Drive document and database records
-    const documentResult = await createDocumentRecords(
-      context.project.id,
-      brandOriginDocument,
-      correlationId
+    // Step 2: Generate brand origin document using LLM (with optional feedback)
+    const brandOriginDocument = await generateBrandOriginWithLLM(
+      context,
+      feedbackContext
     );
 
-    // Step 4: Update Asana task and add PM comment
-    await updateAsanaWorkflow(context, documentResult, correlationId);
+    // Step 3: Create or update document records based on whether this is regeneration
+    const documentResult = feedbackContext?.isRegeneration
+      ? await updateExistingDocumentRecords(
+          feedbackContext.originalDocumentId,
+          brandOriginDocument,
+          correlationId,
+          feedbackContext
+        )
+      : await createDocumentRecords(
+          context.project.id,
+          brandOriginDocument,
+          correlationId
+        );
 
-    // Step 5: Send PM notification email with action tokens
+    // Step 4: Update Asana task and add PM comment (different content for regeneration)
+    await updateAsanaWorkflow(
+      context,
+      documentResult,
+      correlationId,
+      feedbackContext
+    );
+
+    // Step 5: Send PM notification email with action tokens (different content for regeneration)
     await sendPMAdminNotificationEmail(
       context,
       documentResult,
       DocumentType.BRAND_ORIGIN,
-      correlationId
+      correlationId,
+      feedbackContext
     );
 
     const duration = Date.now() - startTime;
@@ -217,22 +237,28 @@ async function assembleProjectContext(projectId) {
 /**
  * Generate brand origin document using LLM with plan → compose → self-check workflow
  * @param {Object} context - Complete project context
+ * @param {Object} feedbackContext - Optional feedback context for regeneration
  * @returns {Object} Generated brand origin document with metadata
  */
-async function generateBrandOriginWithLLM(context) {
+async function generateBrandOriginWithLLM(context, feedbackContext = null) {
   try {
     // Generate LLM context using prompt service
     const llmContext = BrandOriginPromptService.generateLLMContext(
       context.project,
-      context.questionnaireResponse
+      context.questionnaireResponse,
+      feedbackContext
     );
 
     logger.info(
       {
         projectId: context.project.id,
         industry: llmContext.metadata.industry,
+        isRegeneration: !!feedbackContext,
+        feedbackEmailId: feedbackContext?.emailId,
       },
-      "Starting LLM brand origin generation"
+      feedbackContext
+        ? "Starting LLM brand origin regeneration"
+        : "Starting LLM brand origin generation"
     );
 
     // Step 1: Planning Phase - Analyze and plan the brand origin
@@ -710,6 +736,282 @@ function convertBrandOriginToFormattedBlocks(documentText, project) {
 }
 
 /**
+ * Update existing Google Drive document and database records for regeneration
+ * @param {number} documentId - Existing document ID to update
+ * @param {Object} brandOriginDocument - Regenerated brand origin document
+ * @param {string} correlationId - Correlation ID for tracking
+ * @param {Object} feedbackContext - Feedback context for regeneration
+ * @returns {Object} Updated document information
+ */
+async function updateExistingDocumentRecords(
+  documentId,
+  brandOriginDocument,
+  correlationId,
+  feedbackContext
+) {
+  let documentRecord = null;
+
+  try {
+    logger.info(
+      {
+        documentId,
+        feedbackEmailId: feedbackContext?.emailId,
+        correlationId,
+      },
+      "Starting document regeneration update"
+    );
+
+    // Step 1: Get existing document record
+    documentRecord = await withTransaction(async (tx) => {
+      const document = await tx.document.findUnique({
+        where: { id: documentId },
+        include: {
+          project: {
+            include: { client: true },
+          },
+          currentRevision: true,
+        },
+      });
+
+      if (!document) {
+        throw new Error(`Document with ID ${documentId} not found`);
+      }
+
+      if (!document.driveFileId) {
+        throw new Error(
+          `Document ${documentId} does not have a Google Drive file ID`
+        );
+      }
+
+      logger.info(
+        {
+          documentId,
+          projectId: document.projectId,
+          driveFileId: document.driveFileId,
+          correlationId,
+        },
+        "Retrieved existing document for regeneration"
+      );
+
+      return {
+        document,
+        project: document.project,
+        documentTitle: `Brand Origin - ${document.project.client.name}`,
+      };
+    });
+
+    // Step 2: Update Google Drive document content (outside transaction)
+    // First ensure documents folder exists (following same pattern as createDocumentRecords)
+    let folderId = null;
+    try {
+      const documentsFolder = await googleIntegration.ensureDocumentsFolder();
+      folderId = documentsFolder.id;
+    } catch (folderError) {
+      logger.warn(
+        {
+          documentId,
+          error: folderError.message,
+          correlationId,
+        },
+        "Failed to ensure documents folder exists during regeneration"
+      );
+    }
+
+    // Convert brand origin document to formatted blocks
+    const formattedBlocks = convertBrandOriginToFormattedBlocks(
+      brandOriginDocument.document,
+      documentRecord.project
+    );
+
+    // Try to update with formatted content first, then fallback to plain text
+    let documentUpdateSuccessful = false;
+    let lastUpdateError = null;
+
+    try {
+      // First try updating with formatted blocks (preferred method)
+      await googleIntegration.updateDocumentContent(
+        documentRecord.document.driveFileId,
+        formattedBlocks
+      );
+
+      documentUpdateSuccessful = true;
+      logger.info(
+        {
+          documentId,
+          googleDocId: documentRecord.document.driveFileId,
+          correlationId,
+        },
+        "Google Drive document updated successfully with formatted content for regeneration"
+      );
+    } catch (formattedUpdateError) {
+      logger.warn(
+        {
+          documentId,
+          googleDocId: documentRecord.document.driveFileId,
+          error: formattedUpdateError.message,
+          correlationId,
+        },
+        "Formatted document update failed, falling back to plain text update"
+      );
+
+      try {
+        // Fallback to plain text update
+        await googleIntegration.updateDocument(
+          documentRecord.document.driveFileId,
+          brandOriginDocument.document
+        );
+
+        documentUpdateSuccessful = true;
+        logger.info(
+          {
+            documentId,
+            googleDocId: documentRecord.document.driveFileId,
+            correlationId,
+          },
+          "Google Drive document updated successfully with plain text for regeneration"
+        );
+      } catch (plainUpdateError) {
+        lastUpdateError = plainUpdateError;
+        logger.error(
+          {
+            documentId,
+            googleDocId: documentRecord.document.driveFileId,
+            formattedError: formattedUpdateError.message,
+            plainError: plainUpdateError.message,
+            correlationId,
+          },
+          "Both formatted and plain text document updates failed - aborting regeneration"
+        );
+      }
+    }
+
+    // If both update methods failed, throw error to trigger retry logic and failure notification
+    if (!documentUpdateSuccessful) {
+      const combinedError = new Error(
+        `Document regeneration failed: Unable to update Google Drive document. Both formatted and plain text updates failed. Last error: ${
+          lastUpdateError?.message || "Unknown error"
+        }`
+      );
+      combinedError.cause = lastUpdateError;
+      throw combinedError;
+    }
+
+    // Step 3: Create new revision and update document status
+    const finalResult = await withTransaction(async (tx) => {
+      // Create new document revision for regeneration
+      const revision = await tx.documentRevision.create({
+        data: {
+          documentId: documentId,
+          driveRevisionId: null, // Google Docs manages revisions internally
+          snapshotText: brandOriginDocument.document,
+          snapshotMd: null,
+          summary: `Document regenerated based on client feedback. Original score: ${brandOriginDocument.metadata.finalScore}/10. Feedback from email ID: ${feedbackContext.emailId}`,
+          createdBy: "AGENT",
+          createdAt: new Date(),
+        },
+      });
+
+      // Update document status and current revision
+      const updatedDocument = await tx.document.update({
+        where: { id: documentId },
+        data: {
+          currentRevisionId: revision.id,
+          status: DocumentStatus.PM_REVIEW, // Reset to PM review after regeneration
+          updatedAt: new Date(),
+        },
+      });
+
+      // Create audit log entry for regeneration
+      await tx.auditLog.create({
+        data: {
+          projectId: documentRecord.project.id,
+          actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+          action: AuditActions.BRAND_ORIGIN_REGENERATED,
+          details: {
+            documentId: documentId,
+            googleDocId: documentRecord.document.driveFileId,
+            aiScore: brandOriginDocument.metadata.finalScore,
+            tokensUsed: brandOriginDocument.metadata.totalTokensUsed,
+            refinementAttempts: brandOriginDocument.metadata.refinementAttempts,
+            feedbackEmailId: feedbackContext.emailId,
+            feedbackSummary: feedbackContext.intentResult?.summary,
+            requestedChangesCount:
+              feedbackContext.intentResult?.requestedChanges?.length || 0,
+            correlationId,
+          },
+          at: new Date(),
+        },
+      });
+
+      logger.info(
+        {
+          documentId,
+          revisionId: revision.id,
+          googleDocId: documentRecord.document.driveFileId,
+          correlationId,
+        },
+        "Document regeneration records updated successfully"
+      );
+
+      return {
+        documentId: documentId,
+        revisionId: revision.id,
+        googleDocId: documentRecord.document.driveFileId,
+        webViewLink: `https://docs.google.com/document/d/${documentRecord.document.driveFileId}/edit`,
+        documentTitle: documentRecord.documentTitle,
+        isRegeneration: true,
+      };
+    });
+
+    return finalResult;
+  } catch (error) {
+    logger.error(
+      {
+        documentId,
+        error: error.message,
+        correlationId,
+        hasDocumentRecord: !!documentRecord,
+      },
+      "Failed to update document records for regeneration"
+    );
+
+    // Log the failure in audit log if we have document info
+    if (documentRecord) {
+      try {
+        await withTransaction(async (tx) => {
+          await tx.auditLog.create({
+            data: {
+              projectId: documentRecord.project.id,
+              actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+              action: AuditActions.BRAND_ORIGIN_FAILED,
+              details: {
+                documentId: documentId,
+                error: error.message,
+                correlationId,
+                stage: "document_regeneration",
+                feedbackEmailId: feedbackContext?.emailId,
+              },
+              at: new Date(),
+            },
+          });
+        });
+      } catch (auditError) {
+        logger.error(
+          {
+            documentId,
+            auditError: auditError.message,
+            correlationId,
+          },
+          "Failed to log regeneration failure to audit log"
+        );
+      }
+    }
+
+    throw error;
+  }
+}
+
+/**
  * Create Google Drive document and database records
  * Uses separate transactions to avoid timeout issues with Google API calls
  * @param {number} projectId - Project ID
@@ -1022,8 +1324,14 @@ async function createDocumentRecords(
  * @param {Object} context - Project context
  * @param {Object} documentResult - Created document information
  * @param {string} correlationId - Correlation ID for tracking
+ * @param {Object} feedbackContext - Optional feedback context for regeneration
  */
-async function updateAsanaWorkflow(context, documentResult, correlationId) {
+async function updateAsanaWorkflow(
+  context,
+  documentResult,
+  correlationId,
+  feedbackContext = null
+) {
   try {
     // Get pending projects configuration first
     const pendingProjectsConfig =
@@ -1111,60 +1419,66 @@ async function updateAsanaWorkflow(context, documentResult, correlationId) {
       return;
     }
 
-    // Get the target section GID
-    const brandOriginSectionGid =
-      pendingProjectsConfig.sections[
-        AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE
-      ];
+    // For regeneration, don't move the task - it should already be in the correct section
+    if (!feedbackContext?.isRegeneration) {
+      // Get the target section GID
+      const brandOriginSectionGid =
+        pendingProjectsConfig.sections[
+          AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE
+        ];
 
-    if (!brandOriginSectionGid) {
-      throw new AsanaError(
-        "updateAsanaWorkflow",
-        new Error("Brand Origin Doc Phase section not found in configuration"),
-        {
-          projectId: context.project.id,
-          availableSections: Object.keys(pendingProjectsConfig.sections),
-        }
+      if (!brandOriginSectionGid) {
+        throw new AsanaError(
+          "updateAsanaWorkflow",
+          new Error(
+            "Brand Origin Doc Phase section not found in configuration"
+          ),
+          {
+            projectId: context.project.id,
+            availableSections: Object.keys(pendingProjectsConfig.sections),
+          }
+        );
+      }
+
+      // Move task to Brand Origin Doc Phase section with all required parameters
+      await asanaIntegration.moveTaskToSection(
+        asanaTask.taskGid, // taskGid
+        pendingProjectsConfig.projectGid, // projectGid
+        brandOriginSectionGid // sectionGid
       );
-    }
 
-    // Move task to Brand Origin Doc Phase section with all required parameters
-    await asanaIntegration.moveTaskToSection(
-      asanaTask.taskGid, // taskGid
-      pendingProjectsConfig.projectGid, // projectGid
-      brandOriginSectionGid // sectionGid
-    );
+      // Update the asanaTask record in database to reflect the new section
+      try {
+        await prisma.asanaTask.update({
+          where: { id: asanaTask.id },
+          data: {
+            sectionName:
+              AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
+          },
+        });
+      } catch (updateError) {
+        logger.warn(
+          {
+            projectId: context.project.id,
+            asanaTaskId: asanaTask.id,
+            updateError: updateError.message,
+            correlationId,
+          },
+          "Failed to update asanaTask section in database - continuing anyway"
+        );
+      }
 
-    // Update the asanaTask record in database to reflect the new section
-    try {
-      await prisma.asanaTask.update({
-        where: { id: asanaTask.id },
-        data: {
-          sectionName: AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
-        },
-      });
-    } catch (updateError) {
-      logger.warn(
+      logger.info(
         {
           projectId: context.project.id,
-          asanaTaskId: asanaTask.id,
-          updateError: updateError.message,
+          taskGid: asanaTask.taskGid,
+          projectGid: pendingProjectsConfig.projectGid,
+          sectionGid: brandOriginSectionGid,
           correlationId,
         },
-        "Failed to update asanaTask section in database - continuing anyway"
+        "Task moved to Brand Origin Doc Phase successfully and database updated"
       );
     }
-
-    logger.info(
-      {
-        projectId: context.project.id,
-        taskGid: asanaTask.taskGid,
-        projectGid: pendingProjectsConfig.projectGid,
-        sectionGid: brandOriginSectionGid,
-        correlationId,
-      },
-      "Task moved to Brand Origin Doc Phase successfully and database updated"
-    );
 
     // Get PM user for @mention
     const pmUser = await AsanaPendingProjectsService.getPMUser(
@@ -1173,16 +1487,60 @@ async function updateAsanaWorkflow(context, documentResult, correlationId) {
 
     // Add comment with PM mention and document links
     // Prepare the comment content with both text and HTML versions
-    const commentContent = `<body>
+    const commentContent = feedbackContext?.isRegeneration
+      ? `<body>
+🔄 <strong>Brand Origin Document Regenerated</strong>
+
+The AI agent has successfully regenerated the brand origin document for <strong>${
+          context.project.client.name
+        }</strong> based on client feedback.
+
+📄 <strong>Updated Document:</strong> <a href="${
+          documentResult.webViewLink
+        }">View Regenerated Brand Origin Document</a>
+
+<strong>Client Feedback Summary:</strong>
+${feedbackContext.intentResult?.summary || "No summary available"}
+
+<strong>Changes Implemented:</strong>
+${
+  feedbackContext.intentResult?.requestedChanges?.length > 0
+    ? feedbackContext.intentResult.requestedChanges
+        .map(
+          (change, index) =>
+            `${index + 1}. ${change.section ? `[${change.section}] ` : ""}${
+              change.change
+            }`
+        )
+        .join("\n")
+    : "General improvements based on feedback"
+}
+
+<strong>Next Steps:</strong>
+<ol>
+  <li>🔍 <strong>Review</strong> the regenerated document for feedback integration</li>
+  <li>✏️ <strong>Edit</strong> directly in Google Docs if further changes are needed</li>
+  <li>📧 <strong>Send to Client from email notification</strong> when ready for client review</li>
+</ol>
+
+The document is currently in <strong>PM_REVIEW</strong> status and ready for PM review.
+
+${
+  pmUser && pmUser.asanaUserGid
+    ? `<a data-asana-gid="${pmUser.asanaUserGid}" data-asana-type="user">@${pmUser.name}</a>`
+    : "@PM"
+} please review the regenerated document and proceed when ready.
+</body>`
+      : `<body>
 🎨 <strong>Brand Origin Document Created</strong>
 
 The AI agent has successfully generated the brand origin document for <strong>${
-      context.project.client.name
-    }</strong>.
+          context.project.client.name
+        }</strong>.
 
 📄 <strong>Document:</strong> <a href="${
-      documentResult.webViewLink
-    }">View Brand Origin Document</a>
+          documentResult.webViewLink
+        }">View Brand Origin Document</a>
 
 <strong>Next Steps:</strong>
 <ol>
@@ -1261,12 +1619,14 @@ ${
  * @param {Object} documentResult - Created document information
  * @param {string} documentType - Type of document (BRAND_ORIGIN, BUDGET_TIMELINE, BUDGET_TIMELINE_VARIANT)
  * @param {string} correlationId - Correlation ID for tracking
+ * @param {Object} feedbackContext - Optional feedback context for regeneration
  */
 async function sendPMAdminNotificationEmail(
   context,
   documentResult,
   documentType,
-  correlationId
+  correlationId,
+  feedbackContext = null
 ) {
   try {
     // Get PM email address
@@ -1315,17 +1675,25 @@ async function sendPMAdminNotificationEmail(
       generateLinkToken: generateLinkToken.token,
     };
 
-    // Generate email template with action tokens
+    // Generate email template with action tokens (different for regeneration)
     // TODO: Create generateBudgetTimelineNotificationTemplate and generateBudgetTimelineVariantNotificationTemplate in emailTemplateService.js
     const emailTemplate = (() => {
       switch (documentType) {
         case DocumentType.BRAND_ORIGIN:
-          return EmailTemplateService.generateBrandOriginNotificationTemplate(
-            context.project,
-            documentResult,
-            context.emailThread,
-            actionTokens
-          );
+          return feedbackContext?.isRegeneration
+            ? EmailTemplateService.generateBrandOriginRegenerationNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                actionTokens,
+                feedbackContext
+              )
+            : EmailTemplateService.generateBrandOriginNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                actionTokens
+              );
         case DocumentType.BUDGET_TIMELINE:
           return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
             context.project,
@@ -1341,12 +1709,20 @@ async function sendPMAdminNotificationEmail(
             actionTokens
           );
         default:
-          return EmailTemplateService.generateBrandOriginNotificationTemplate(
-            context.project,
-            documentResult,
-            context.emailThread,
-            actionTokens
-          );
+          return feedbackContext?.isRegeneration
+            ? EmailTemplateService.generateBrandOriginRegenerationNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                actionTokens,
+                feedbackContext
+              )
+            : EmailTemplateService.generateBrandOriginNotificationTemplate(
+                context.project,
+                documentResult,
+                context.emailThread,
+                actionTokens
+              );
       }
     })();
 
@@ -1406,12 +1782,20 @@ async function sendPMAdminNotificationEmail(
         const adminEmailTemplate = (() => {
           switch (documentType) {
             case DocumentType.BRAND_ORIGIN:
-              return EmailTemplateService.generateBrandOriginNotificationTemplate(
-                context.project,
-                documentResult,
-                context.emailThread,
-                adminActionTokens
-              );
+              return feedbackContext?.isRegeneration
+                ? EmailTemplateService.generateBrandOriginRegenerationNotificationTemplate(
+                    context.project,
+                    documentResult,
+                    context.emailThread,
+                    adminActionTokens,
+                    feedbackContext
+                  )
+                : EmailTemplateService.generateBrandOriginNotificationTemplate(
+                    context.project,
+                    documentResult,
+                    context.emailThread,
+                    adminActionTokens
+                  );
             case DocumentType.BUDGET_TIMELINE:
               return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
                 context.project,
@@ -1427,12 +1811,20 @@ async function sendPMAdminNotificationEmail(
                 adminActionTokens
               );
             default:
-              return EmailTemplateService.generateBrandOriginNotificationTemplate(
-                context.project,
-                documentResult,
-                context.emailThread,
-                adminActionTokens
-              );
+              return feedbackContext?.isRegeneration
+                ? EmailTemplateService.generateBrandOriginRegenerationNotificationTemplate(
+                    context.project,
+                    documentResult,
+                    context.emailThread,
+                    adminActionTokens,
+                    feedbackContext
+                  )
+                : EmailTemplateService.generateBrandOriginNotificationTemplate(
+                    context.project,
+                    documentResult,
+                    context.emailThread,
+                    adminActionTokens
+                  );
           }
         })();
 

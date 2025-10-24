@@ -66,10 +66,14 @@ class QueueService {
 
   // Brand origin document generation job with specific dedupe key
   static async addBrandOriginGenerationJob(data, priority = 1) {
-    const dedupeKey = `project:${data.projectId}:brand_origin:generate`;
+    // Create different dedupe keys for initial generation vs regeneration
+    const dedupeKey = data.feedbackContext?.isRegeneration
+      ? `project:${data.projectId}:brand_origin:regenerate:${data.feedbackContext.emailId}`
+      : `project:${data.projectId}:brand_origin:generate`;
+
     const jobOptions = {
       ...DEFAULT_JOB_OPTIONS,
-      priority,
+      priority: data.feedbackContext?.isRegeneration ? priority + 1 : priority, // Higher priority for regeneration
       jobId: dedupeKey, // Ensure idempotency with dedupe key
     };
 

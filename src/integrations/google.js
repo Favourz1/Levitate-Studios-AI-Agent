@@ -1259,6 +1259,232 @@ class GoogleIntegration {
     }
   }
 
+  // Update document content with formatted blocks (for regeneration)
+  async updateDocumentContent(documentId, formattedBlocks) {
+    const startTime = Date.now();
+
+    try {
+      await retry(
+        async () => {
+          // Get current document content to determine insertion point
+          const doc = await this.docs.documents.get({
+            documentId,
+          });
+
+          const endIndex =
+            doc.data.body.content[doc.data.body.content.length - 1].endIndex -
+            1;
+
+          // Clear existing content first
+          await this.docs.documents.batchUpdate({
+            documentId,
+            requestBody: {
+              requests: [
+                {
+                  deleteContentRange: {
+                    range: {
+                      startIndex: 1,
+                      endIndex,
+                    },
+                  },
+                },
+              ],
+            },
+          });
+
+          // Now add the formatted content using the same logic as createFormattedDocument
+          // but without creating a new document
+          const requests = [];
+          let currentIndex = 1;
+
+          for (const block of formattedBlocks) {
+            switch (block.type) {
+              case "paragraph":
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: block.text + "\n\n",
+                  },
+                });
+                currentIndex += block.text.length + 2;
+                break;
+
+              case "heading":
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: block.text + "\n\n",
+                  },
+                });
+
+                // Apply heading style
+                requests.push({
+                  updateParagraphStyle: {
+                    range: {
+                      startIndex: currentIndex,
+                      endIndex: currentIndex + block.text.length,
+                    },
+                    paragraphStyle: {
+                      namedStyleType: `HEADING_${block.level || 1}`,
+                    },
+                    fields: "namedStyleType",
+                  },
+                });
+
+                if (block.style?.bold) {
+                  requests.push({
+                    updateTextStyle: {
+                      range: {
+                        startIndex: currentIndex,
+                        endIndex: currentIndex + block.text.length,
+                      },
+                      textStyle: {
+                        bold: true,
+                      },
+                      fields: "bold",
+                    },
+                  });
+                }
+
+                currentIndex += block.text.length + 2;
+                break;
+
+              case "styled":
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: block.text + "\n\n",
+                  },
+                });
+
+                if (block.style?.bold || block.style?.italic) {
+                  const textStyle = {};
+                  if (block.style.bold) textStyle.bold = true;
+                  if (block.style.italic) textStyle.italic = true;
+
+                  requests.push({
+                    updateTextStyle: {
+                      range: {
+                        startIndex: currentIndex,
+                        endIndex: currentIndex + block.text.length,
+                      },
+                      textStyle,
+                      fields: Object.keys(textStyle).join(","),
+                    },
+                  });
+                }
+
+                currentIndex += block.text.length + 2;
+                break;
+
+              case "spacer":
+                // Add empty lines for spacing
+                const spacerLines = Math.max(
+                  1,
+                  Math.floor((block.height || 12) / 12)
+                );
+                const spacerText = "\n".repeat(spacerLines);
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: spacerText,
+                  },
+                });
+                currentIndex += spacerText.length;
+                break;
+
+              case "bullets":
+                for (const item of block.items) {
+                  requests.push({
+                    insertText: {
+                      location: { index: currentIndex },
+                      text: `• ${item}\n`,
+                    },
+                  });
+                  currentIndex += item.length + 3;
+                }
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: "\n",
+                  },
+                });
+                currentIndex += 1;
+                break;
+
+              case "numbered":
+                for (let i = 0; i < block.items.length; i++) {
+                  const item = block.items[i];
+                  requests.push({
+                    insertText: {
+                      location: { index: currentIndex },
+                      text: `${i + 1}. ${item}\n`,
+                    },
+                  });
+                  currentIndex += item.length + `${i + 1}. `.length + 1;
+                }
+                requests.push({
+                  insertText: {
+                    location: { index: currentIndex },
+                    text: "\n",
+                  },
+                });
+                currentIndex += 1;
+                break;
+
+              default:
+                // Handle unknown block types as plain text
+                if (block.text) {
+                  requests.push({
+                    insertText: {
+                      location: { index: currentIndex },
+                      text: block.text + "\n\n",
+                    },
+                  });
+                  currentIndex += block.text.length + 2;
+                }
+                break;
+            }
+          }
+
+          // Execute all requests in batches to avoid API limits
+          const batchSize = 50;
+          for (let i = 0; i < requests.length; i += batchSize) {
+            const batch = requests.slice(i, i + batchSize);
+            if (batch.length > 0) {
+              await this.docs.documents.batchUpdate({
+                documentId,
+                requestBody: { requests: batch },
+              });
+            }
+          }
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "updateDocumentContent",
+        true,
+        duration
+      );
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Google Drive",
+        "updateDocumentContent",
+        false,
+        duration,
+        error
+      );
+      throw new GoogleError("updateDocumentContent", error, { documentId });
+    }
+  }
+
   // Export document as plain text
   async exportDocumentAsText(documentId) {
     const startTime = Date.now();

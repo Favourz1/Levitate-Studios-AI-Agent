@@ -1,16 +1,25 @@
 const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
+const { retry } = require("@/utils");
 const { llmClient } = require("@/llm/client");
 const { z } = require("zod");
 const { ValidationError, LLMError } = require("@/utils/errors");
 const { googleIntegration } = require("@/integrations/google");
 const { IntentPromptService } = require("@/services/intentPromptService");
+const { EmailTemplateService } = require("@/services/emailTemplateService");
+const { brevoIntegration } = require("@/integrations/brevo");
+const {
+  AsanaPendingProjectsService,
+} = require("@/services/asanaPendingProjectsService");
 const {
   EmailIntent,
   DocumentStatus,
   ProjectPhase,
   AuditActions,
+  DocumentType,
 } = require("@/constants");
+const { QueueService } = require("@/queues");
+const { appConfig } = require("@/config");
 
 const logger = createLogger("worker:emailIntent");
 const prisma = getPrismaClient();
@@ -767,20 +776,19 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
         documentId: currentDocument.id,
         correlationId,
       },
-      "Document status updated to CLIENT_FEEDBACK - Manual PM review required"
+      "Document status updated to CLIENT_FEEDBACK - Starting regeneration workflow"
     );
 
-    // TODO: In future iterations, we can add:
-    // 1. Automatic document regeneration based on feedback
-    // 2. PM notification email with feedback summary
-    // 3. Asana task comment with client feedback
+    // Step 3: Trigger automatic document regeneration based on feedback
+    await triggerDocumentRegeneration(context, intentResult, correlationId);
 
     return {
       actionTaken: true,
       intent: EmailIntent.DOC_FEEDBACK,
-      message: "Document marked for feedback - PM review required",
+      message: "Document regeneration triggered based on client feedback",
       documentId: currentDocument.id,
       documentStatus: DocumentStatus.CLIENT_FEEDBACK,
+      regenerationTriggered: true,
     };
   } catch (error) {
     logger.error(
@@ -1079,6 +1087,273 @@ const emailIntentProcessor = async (job) => {
     throw error;
   }
 };
+
+/**
+ * Trigger document regeneration based on client feedback
+ * @param {Object} context - Email context
+ * @param {Object} intentResult - Intent detection result
+ * @param {string} correlationId - Correlation ID for tracking
+ * @returns {Promise<void>}
+ */
+async function triggerDocumentRegeneration(
+  context,
+  intentResult,
+  correlationId
+) {
+  const { project, currentDocument, email } = context;
+
+  try {
+    logger.info(
+      {
+        emailId: email.id,
+        projectId: project.id,
+        documentId: currentDocument.id,
+        documentType: currentDocument.type,
+        correlationId,
+      },
+      "Starting document regeneration workflow"
+    );
+
+    // Use retry logic for the regeneration process
+    await retry(
+      async () => {
+        // Prepare feedback context for regeneration
+        const feedbackContext = {
+          isRegeneration: true,
+          emailId: email.id,
+          originalDocumentId: currentDocument.id,
+          intentResult,
+          originalDocumentContent:
+            currentDocument.sentContent || currentDocument.content,
+          emailInfo: {
+            from: email.from,
+            subject: email.subject,
+            textBody: email.textBody,
+            receivedAt: email.receivedAt,
+          },
+        };
+
+        // Enqueue document regeneration job based on document type
+        switch (currentDocument.type) {
+          case DocumentType.BRAND_ORIGIN:
+            const jobData = {
+              projectId: project.id,
+              correlationId,
+              feedbackContext,
+              timestamp: new Date().toISOString(),
+            };
+
+            const job = await QueueService.addBrandOriginGenerationJob(
+              jobData,
+              2
+            ); // High priority for regeneration
+
+            logger.info(
+              {
+                jobId: job.id,
+                emailId: email.id,
+                projectId: project.id,
+                documentId: currentDocument.id,
+                correlationId,
+              },
+              "Brand origin regeneration job enqueued successfully"
+            );
+            break;
+
+          default:
+            logger.warn(
+              {
+                emailId: email.id,
+                documentType: currentDocument.type,
+                correlationId,
+              },
+              "Document type not supported for automatic regeneration"
+            );
+            // For unsupported document types, just log and continue
+            // Future: Add support for other document types
+            break;
+        }
+
+        // Create audit log for regeneration trigger
+        await prisma.auditLog.create({
+          data: {
+            projectId: project.id,
+            actor: "SYSTEM (Intent Detection)",
+            action: "DOCUMENT_REGENERATION_TRIGGERED",
+            details: {
+              emailId: email.id,
+              documentId: currentDocument.id,
+              documentType: currentDocument.type,
+              intent: intentResult.intent,
+              confidence: intentResult.confidence,
+              summary: intentResult.summary,
+              requestedChangesCount: intentResult.requestedChanges?.length || 0,
+              correlationId,
+            },
+            at: new Date(),
+          },
+        });
+      },
+      3, // maxAttempts
+      2000, // delayMs - 2 seconds
+      2 // backoffMultiplier
+    );
+
+    logger.info(
+      {
+        emailId: email.id,
+        projectId: project.id,
+        documentId: currentDocument.id,
+        correlationId,
+      },
+      "Document regeneration workflow triggered successfully"
+    );
+  } catch (error) {
+    logger.error(
+      {
+        emailId: email.id,
+        projectId: project.id,
+        documentId: currentDocument.id,
+        error: error.message,
+        stack: error.stack,
+        correlationId,
+      },
+      "Failed to trigger document regeneration after 3 retry attempts"
+    );
+
+    // Notify admin and PM about the failure
+    await notifyRegenerationFailure(
+      context,
+      intentResult,
+      error,
+      correlationId
+    );
+
+    // Don't throw error - this shouldn't fail the main intent handling
+    // The document status has already been updated, so PM can handle manually
+  }
+}
+
+/**
+ * Notify admin and PM about document regeneration failure
+ * @param {Object} context - Email context
+ * @param {Object} intentResult - Intent detection result
+ * @param {Error} error - The error that occurred
+ * @param {string} correlationId - Correlation ID for tracking
+ * @returns {Promise<void>}
+ */
+async function notifyRegenerationFailure(
+  context,
+  intentResult,
+  error,
+  correlationId
+) {
+  try {
+    const { project, currentDocument, email } = context;
+
+    // Get PM user for notification
+    const pmUser = await AsanaPendingProjectsService.getPMUser(project.id);
+
+    // Prepare notification recipients
+    const recipients = [];
+
+    if (pmUser && pmUser.email) {
+      recipients.push({
+        email: pmUser.email,
+        name: pmUser.name,
+        role: "PM",
+      });
+    }
+
+    if (appConfig.server.adminEmail) {
+      recipients.push({
+        email: appConfig.server.adminEmail,
+        name: "Admin",
+        role: "Admin",
+      });
+    }
+
+    if (recipients.length === 0) {
+      logger.warn(
+        {
+          projectId: project.id,
+          correlationId,
+        },
+        "No recipients found for regeneration failure notification"
+      );
+      return;
+    }
+
+    // Generate failure notification email using EmailTemplateService
+    const emailTemplate =
+      EmailTemplateService.generateDocumentRegenerationFailureTemplate(
+        project,
+        currentDocument,
+        email,
+        intentResult,
+        error,
+        correlationId
+      );
+
+    // Send notification to all recipients
+    for (const recipient of recipients) {
+      try {
+        await brevoIntegration.sendTransactionalEmail({
+          to: [recipient.email],
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            projectId: project.id,
+            correlationId,
+          },
+          "Regeneration failure notification sent successfully"
+        );
+      } catch (emailError) {
+        logger.error(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            emailError: emailError.message,
+            projectId: project.id,
+            correlationId,
+          },
+          "Failed to send regeneration failure notification"
+        );
+      }
+    }
+
+    // Create audit log for the failure notification
+    await prisma.auditLog.create({
+      data: {
+        projectId: project.id,
+        actor: "SYSTEM (Error Handler)",
+        action: "REGENERATION_FAILURE_NOTIFIED",
+        details: {
+          emailId: email.id,
+          documentId: currentDocument.id,
+          error: error.message,
+          recipientsNotified: recipients.map((r) => r.email),
+          correlationId,
+        },
+        at: new Date(),
+      },
+    });
+  } catch (notificationError) {
+    logger.error(
+      {
+        projectId: context.project.id,
+        notificationError: notificationError.message,
+        correlationId,
+      },
+      "Failed to send regeneration failure notifications"
+    );
+  }
+}
 
 /**
  * Retrieve complete intent metadata for document regeneration

@@ -399,22 +399,36 @@ Provide your validation assessment now.`;
    * Generate complete LLM context for brand origin generation
    * @param {Object} projectData - Project information
    * @param {Object} questionnaireData - Questionnaire responses
+   * @param {Object} feedbackContext - Optional feedback context for regeneration
    * @returns {Object} Complete context for LLM processing
    */
-  static generateLLMContext(projectData, questionnaireData) {
+  static generateLLMContext(
+    projectData,
+    questionnaireData,
+    feedbackContext = null
+  ) {
     const context = BrandOriginContextService.getBrandOriginContext(
       projectData,
       questionnaireData
     );
 
+    // Add feedback context if this is a regeneration
+    if (feedbackContext) {
+      context.feedbackContext = feedbackContext;
+    }
+
     return {
       systemPrompt: this.generateSystemPrompt(context),
-      userPrompt: this.generateBrandOriginPrompt(context),
+      userPrompt: feedbackContext
+        ? this.generateBrandOriginRegenerationPrompt(context, feedbackContext)
+        : this.generateBrandOriginPrompt(context),
       context,
       metadata: {
         projectId: projectData.id,
         clientName: projectData.client?.name,
         industry: context.questionnaire?.structured?.industry,
+        isRegeneration: !!feedbackContext,
+        feedbackEmailId: feedbackContext?.emailId,
         timestamp: new Date().toISOString(),
       },
     };
@@ -450,6 +464,249 @@ Refine the brand origin document based on the feedback provided. Maintain the ov
 - Preserve approved elements
 
 Generate the refined brand origin document now.`;
+  }
+
+  /**
+   * Generate brand origin regeneration prompt incorporating client feedback
+   * @param {Object} context - Complete project context
+   * @param {Object} feedbackContext - Client feedback context from intent detection
+   * @returns {string} Regeneration prompt with feedback integration
+   */
+  static generateBrandOriginRegenerationPrompt(context, feedbackContext) {
+    const questionnaire = context.questionnaire?.structured || {};
+    const rawResponses = context.questionnaire?.raw || {};
+    const relevantExample = context.relevantExample;
+    const intentResult = feedbackContext.intentResult || {};
+
+    return `# Brand Origin Document Regeneration Task
+
+## Project Context
+**Client:** ${context.project?.client?.name || "Client Name"}
+**Project:** ${context.project?.name || "Brand Development Project"}
+**Industry:** ${questionnaire.industry || "Not specified"}
+**Task Type:** Document Regeneration Based on Client Feedback
+
+## Client Feedback Analysis
+**Email Received:** ${new Date(
+      feedbackContext.emailInfo?.receivedAt || Date.now()
+    ).toLocaleDateString()}
+**Client Sentiment:** ${intentResult.clientSentiment || "Not analyzed"}
+**Feedback Urgency:** ${intentResult.urgency || "Not specified"}
+**Confidence Level:** ${Math.round((intentResult.confidence || 0) * 100)}%
+
+### Client's Feedback Summary
+${intentResult.summary || "No summary available"}
+
+### Specific Requested Changes
+${
+  intentResult.requestedChanges && intentResult.requestedChanges.length > 0
+    ? intentResult.requestedChanges
+        .map(
+          (change, index) =>
+            `${index + 1}. **${
+              change.section ? `[${change.section}]` : "[General]"
+            }** ${change.change}
+   - Priority: ${change.priority || "Not specified"}
+   - Complexity: ${change.feasibility || "Not specified"}`
+        )
+        .join("\n")
+    : "No specific changes requested"
+}
+
+### Document Type Analysis
+${
+  intentResult.documentTypeAnalysis
+    ? `
+**Structural Impact:** ${
+        intentResult.documentTypeAnalysis.structuralImpact || "Not analyzed"
+      }
+**Sections Referenced:** ${
+        intentResult.documentTypeAnalysis.sectionReferences?.join(", ") ||
+        "None specified"
+      }
+**Compliance Check:** ${
+        intentResult.documentTypeAnalysis.complianceCheck
+          ? "Passed"
+          : "Needs attention"
+      }
+**Implementation Notes:** ${
+        intentResult.documentTypeAnalysis.implementationNotes || "None provided"
+      }
+`
+    : "No document-specific analysis available"
+}
+
+## Original Document Content (Sent to Client)
+${feedbackContext.originalDocumentContent || "Original content not available"}
+
+## Primary Input: Client Questionnaire Responses (Reference)
+${this.formatQuestionnaireForPrompt(rawResponses)}
+
+## Structured Analysis (Reference)
+- **Company Name:** ${questionnaire.companyName || "Not provided"}
+- **Industry:** ${questionnaire.industry || "Not provided"}
+- **Services/Products:** ${
+      Array.isArray(questionnaire.services)
+        ? questionnaire.services.join(", ")
+        : questionnaire.services || "Not provided"
+    }
+- **Target Audience:** ${questionnaire.targetAudience || "Not provided"}
+- **Mission/Goals:** ${
+      questionnaire.mission || questionnaire.goals || "Not provided"
+    }
+
+## Additional Client Context (Reference)
+${
+  context.project?.client?.context
+    ? `Client Background: ${context.project?.client?.context}`
+    : "No additional client context provided"
+}
+
+## Reference Example (Similar Industry/Type)
+${
+  relevantExample
+    ? this.formatExampleForPrompt(relevantExample)
+    : "No specific industry example available"
+}
+
+## Your Task: Regenerate Brand Origin Document with Client Feedback
+
+### Regeneration Approach
+
+#### Phase 1: Feedback Integration Analysis
+1. **Understand Client Intent**
+   - Analyze the specific feedback and requested changes
+   - Identify which sections need modification
+   - Understand the underlying concerns or preferences
+
+2. **Preserve Strategic Foundation**
+   - Maintain the core brand strategy that works
+   - Keep questionnaire-derived insights intact
+   - Preserve successful elements from original document
+
+3. **Strategic Modification Planning**
+   - Plan how to incorporate feedback without compromising brand coherence
+   - Identify dependencies between sections that need coordinated updates
+   - Ensure modifications align with business objectives
+
+#### Phase 2: Document Regeneration (Execute)
+Create an enhanced Brand Origin Document that:
+- **Addresses all specific client feedback points**
+- **Maintains the 12-section structure integrity**
+- **Preserves successful elements from the original**
+- **Incorporates client preferences and concerns**
+- **Enhances clarity and strategic direction**
+
+#### Phase 3: Quality Validation (Verify)
+Ensure the regenerated document:
+- Successfully addresses all client feedback
+- Maintains strategic coherence across all sections
+- Provides clearer, more actionable guidance
+- Delivers enhanced commercial viability
+- Preserves cultural authenticity and market relevance
+
+   ## Regeneration Requirements
+   
+   ### Feedback Integration Standards
+   1. **Address Every Feedback Point**: Each requested change must be thoughtfully incorporated or explained
+   2. **Maintain Brand Coherence**: Changes in one section must harmonize with all other sections
+   3. **Enhance Clarity**: Use client feedback to improve overall document clarity and actionability
+   4. **Preserve Strengths**: Keep successful elements that weren't criticized
+   5. **Cultural Sensitivity**: Ensure modifications respect cultural context and market dynamics
+   
+   ### Document Enhancement Goals
+   - **Improved Client Alignment**: Better reflect client vision and preferences
+   - **Enhanced Actionability**: Provide clearer guidance for creative execution
+   - **Stronger Strategic Foundation**: Build on feedback to create more robust strategy
+   - **Better Market Positioning**: Incorporate client insights for stronger market relevance
+   
+   ### Levitate Studios Standards Compliance
+   
+   #### BRICS Methodology Integration
+   Ensure the regenerated document maintains alignment with Levitate's BRICS framework:
+   - **BRIEF**: Client feedback has been properly analyzed and understood
+   - **RESEARCH**: Market insights and competitive analysis remain current and relevant
+   - **INSPIRATION**: Creative references and examples support the updated strategy
+   - **CREATE**: Strategic synthesis reflects both original insights and client feedback
+   - **SHARE**: Final presentation is clear, implementable, and client-approved
+   
+   #### Success Metrics Alignment
+   The regenerated document must support Levitate's success metrics:
+   - **80-90% reduction** in creative brief-to-execution time through enhanced clarity
+   - **80% increase** in first-draft approval rates by addressing client concerns upfront
+   - **Minimal revision cycles** through comprehensive feedback integration
+   - **Enhanced creative velocity** for implementation teams
+   - **Superior client satisfaction** through responsive strategic refinement
+   
+   #### Compliance & Data Handling
+   Maintain strict compliance standards:
+   - **NDPR/GDPR Compliance**: Ensure all client data handling meets Nigerian Data Protection Regulation and GDPR standards
+   - **Client Confidentiality**: Protect sensitive business information and strategic insights
+   - **Audit Trail**: Provide clear reasoning for all strategic modifications
+   - **Cultural Appropriateness**: Respect Nigerian/African cultural context and market dynamics
+   
+   #### Creative Execution Alignment
+   Ensure recommendations align with Levitate's design philosophy:
+   - **Premium Positioning**: Maintain high-end brand development standards
+   - **Cultural Authenticity**: Preserve genuine African brand identity where relevant
+   - **Global Competitiveness**: Enable brands to compete in international markets
+   - **Commercial Viability**: Support measurable business growth and market success
+   - **Creative Excellence**: Enable distinctive visual identity and compelling content strategies
+
+## Output Format & Structure
+Present as a complete, regenerated Brand Origin Document with:
+- Clear section headers using Roman numerals (I., II., III., etc.) in ALL CAPS
+- Each section header on its own line followed by enhanced content
+- Integration of client feedback throughout relevant sections
+- Professional formatting and clean structure
+- No markdown formatting (**, *, etc.) - use plain text
+- Improved clarity and strategic depth based on feedback
+
+## Document Structure Requirements
+1. **Do NOT include** the header table (Client: | Doc:) - this will be added automatically
+2. **Start directly** with the first section: "I. WHO AM I?"
+3. **Section headers** must be exactly:
+   "I. WHO AM I?"
+   "II. WHERE DO I COME FROM?"
+   "III. BRAND PURPOSE"
+   "IV. TARGET AUDIENCE"
+   "V. BRAND VISION"
+   "VI. KEY INSIGHTS"
+   "VII. SINGLE-MINDED MESSAGE"
+   "VIII. POSITIONING"
+   "IX. BRAND VALUES"
+   "X. BRAND PERSONALITY"
+   "XI. BRAND VOICE"
+   "XII. DELIVERABLES"
+4. **Incorporate feedback** naturally within the appropriate sections
+5. **End with** a "Next Steps" section reflecting the regeneration
+
+## Quality Standards for Regeneration
+- Minimum 2,500 words total length (enhanced from original)
+- Each section substantively improved based on feedback
+- Clear evidence of client feedback integration
+- Enhanced strategic depth and market relevance
+- Professional brand strategy standards maintained
+- Improved actionability for creative teams
+
+## Feedback Integration Examples:
+
+If client requested "Make it more professional":
+- Adjust tone throughout all sections
+- Enhance business language and strategic depth
+- Strengthen commercial positioning
+
+If client requested "Focus more on B2B market":
+- Revise Section IV (Target Audience) with B2B focus
+- Adjust Section III (Brand Purpose) for B2B value delivery
+- Update Section VIII (Positioning) for B2B messaging
+
+If client requested "Add more detail to brand personality":
+- Expand Section X with comprehensive personality traits
+- Add specific behavioral guidelines
+- Include tone of voice examples and applications
+
+Generate the complete, enhanced Brand Origin Document now, thoughtfully incorporating all client feedback while maintaining strategic excellence.`;
   }
 }
 

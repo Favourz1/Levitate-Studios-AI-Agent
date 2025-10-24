@@ -2,7 +2,7 @@ const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { parseReplyToAddress, generateDedupeKey } = require("@/utils");
-const { QueueService } = require("@/queues");
+const { QueueService, QUEUE_NAMES } = require("@/queues");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { googleIntegration } = require("@/integrations/google");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
@@ -427,7 +427,7 @@ class EmailInboundService {
 
       // Step 6: Enqueue intent detection job (high priority)
       const dedupeKey = generateDedupeKey(
-        "email-intent",
+        QUEUE_NAMES.EMAIL_INTENT,
         emailRecord.id,
         projectId
       );

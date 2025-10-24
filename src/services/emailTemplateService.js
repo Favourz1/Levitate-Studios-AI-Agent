@@ -322,6 +322,201 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate PM notification email template for brand origin document regeneration
+   * @param {Object} project - Project data
+   * @param {Object} documentResult - Document result data
+   * @param {Object} emailThread - Email thread data
+   * @param {Object} actionTokens - Action tokens for buttons
+   * @param {Object} feedbackContext - Feedback context from client
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateBrandOriginRegenerationNotificationTemplate(
+    project,
+    documentResult,
+    emailThread,
+    actionTokens = {},
+    feedbackContext = {}
+  ) {
+    try {
+      const subject = `🔄 Brand Origin Document Regenerated - ${
+        project.client?.name || "Client"
+      } - ${project.name}`;
+
+      const reviewUrl = actionTokens.generateLinkToken
+        ? `${appConfig.server.baseUrl}/actions/review?t=${actionTokens.generateLinkToken}`
+        : "#";
+
+      const sendToClientUrl = actionTokens.sendToClientToken
+        ? `${appConfig.server.baseUrl}/actions/send-to-client?t=${actionTokens.sendToClientToken}`
+        : "#";
+
+      const intentResult = feedbackContext.intentResult || {};
+      const requestedChanges = intentResult.requestedChanges || [];
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #ff9a56 0%, #ff6b6b 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #e1e5e9; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; }
+            .btn { display: inline-block; padding: 12px 24px; margin: 10px 5px; text-decoration: none; border-radius: 5px; font-weight: 600; text-align: center; }
+            .btn-primary { background-color: #007bff; color: white; }
+            .btn-success { background-color: #28a745; color: white; }
+            .btn:hover { opacity: 0.9; }
+            .project-info { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .feedback-info { background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107; }
+            .icon { font-size: 24px; margin-right: 10px; }
+            .next-steps { background: #e3f2fd; padding: 20px; border-radius: 8px; border-left: 4px solid #2196f3; margin: 20px 0; }
+            .changes-list { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0; }
+            .intent-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0; border-left: 4px solid #28a745; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1><span class="icon">🔄</span>Brand Origin Document Regenerated</h1>
+              <p>AI has regenerated the brand strategy document based on client feedback</p>
+            </div>
+            
+            <div class="content">
+              <div class="project-info">
+                <h3>📋 Project Details</h3>
+                <ul style="list-style: none; padding: 0;">
+                  <li><strong>Client:</strong> ${
+                    project.client?.name || "Unknown Client"
+                  }</li>
+                  <li><strong>Project:</strong> ${project.name}</li>
+                  <li><strong>Document:</strong> Brand Origin Document</li>
+                  <li><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">Regenerated & Ready for Review</span></li>
+                </ul>
+              </div>
+
+              <div class="intent-info">
+                <h3>🤖 AI Intent Detection Results</h3>
+                <ul style="list-style: none; padding: 0;">
+                  <li><strong>Detected Intent:</strong> ${
+                    intentResult.summary || "No summary available"
+                  }</li>
+                  <li><strong>Confidence Level:</strong> ${Math.round(
+                    (intentResult.confidence || 0) * 100
+                  )}%</li>
+                  <li><strong>Client Sentiment:</strong> ${
+                    intentResult.clientSentiment || "Not analyzed"
+                  }</li>
+                  <li><strong>Urgency Level:</strong> ${
+                    intentResult.urgency || "Not specified"
+                  }</li>
+                </ul>
+              </div>
+
+              <div class="feedback-info">
+                <h3>💬 Client Feedback Summary</h3>
+                <p><strong>Summary:</strong> ${
+                  intentResult.summary || "No summary available"
+                }</p>
+                
+                ${
+                  requestedChanges.length > 0
+                    ? `
+                <div class="changes-list">
+                  <h4>📝 Specific Changes Implemented:</h4>
+                  <ol>
+                    ${requestedChanges
+                      .map(
+                        (change, index) => `
+                      <li>
+                        <strong>${
+                          change.section ? `[${change.section}]` : "[General]"
+                        }</strong> ${change.change}
+                        ${
+                          change.priority
+                            ? `<br><small><em>Priority: ${change.priority}</em></small>`
+                            : ""
+                        }
+                      </li>
+                    `
+                      )
+                      .join("")}
+                  </ol>
+                </div>
+                `
+                    : "<p><em>General improvements based on client feedback</em></p>"
+                }
+              </div>
+
+              <div class="next-steps">
+                <h3>🎯 Next Steps</h3>
+                <ol>
+                  <li><strong>Review</strong> the regenerated document for feedback integration</li>
+                  <li><strong>Verify</strong> that client concerns have been addressed</li>
+                  <li><strong>Edit</strong> directly in Google Docs if further refinements are needed</li>
+                  <li><strong>Send to Client</strong> when satisfied with the regenerated version</li>
+                </ol>
+              </div>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${reviewUrl}" class="btn btn-primary">
+                  <span class="icon">🔍</span>Review Regenerated Document
+                </a>
+                <a href="${sendToClientUrl}" class="btn btn-success">
+                  <span class="icon">📧</span>Send to Client
+                </a>
+              </div>
+
+              <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <h4>📄 Document Access</h4>
+                <p><strong>Google Docs:</strong> <a href="${
+                  documentResult.webViewLink || "#"
+                }" target="_blank">View Document</a></p>
+                <p><strong>Client Reply-to:</strong> ${
+                  emailThread?.replyToAddress || "Not available"
+                }</p>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <p><small>This document was regenerated by Levitate Studios AI Agent based on client feedback analysis.</small></p>
+              <p><small>The AI detected client intent with ${Math.round(
+                (intentResult.confidence || 0) * 100
+              )}% confidence and implemented the requested changes.</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated brand origin regeneration notification template",
+        projectId: project?.id,
+        documentId: documentResult?.documentId,
+        feedbackEmailId: feedbackContext?.emailId,
+        intentConfidence: intentResult.confidence,
+        changesCount: requestedChanges.length,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message:
+          "Failed to generate brand origin regeneration notification template",
+        error: error.message,
+        projectId: project?.id,
+        documentId: documentResult?.documentId,
+        feedbackEmailId: feedbackContext?.emailId,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Generate document acceptance confirmation template
    * @param {Object} document - Document data
    * @param {Object} project - Project data
@@ -1000,6 +1195,139 @@ class EmailTemplateService {
       htmlContent,
       textContent: `New Client Email from ${project.client.name}\n\n${emailContent}`,
     };
+  }
+
+  /**
+   * Generate document regeneration failure notification template
+   * @param {Object} project - Project data
+   * @param {Object} currentDocument - Current document data
+   * @param {Object} email - Email data
+   * @param {Object} intentResult - Intent detection result
+   * @param {Error} error - The error that occurred
+   * @param {string} correlationId - Correlation ID for tracking
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateDocumentRegenerationFailureTemplate(
+    project,
+    currentDocument,
+    email,
+    intentResult,
+    error,
+    correlationId
+  ) {
+    try {
+      const subject = `🚨 Document Regeneration Failed - ${
+        project.client?.name || "Client"
+      } - ${project.name}`;
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #dc3545; color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #e1e5e9; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; }
+            .error-box { background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 8px; padding: 15px; margin: 20px 0; }
+            .project-info { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .action-required { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🚨 Document Regeneration Failed</h1>
+              <p>Automatic regeneration failed after 3 retry attempts</p>
+            </div>
+            
+            <div class="content">
+              <div class="project-info">
+                <h3>📋 Project Details</h3>
+                <ul style="list-style: none; padding: 0;">
+                  <li><strong>Client:</strong> ${
+                    project.client?.name || "Unknown Client"
+                  }</li>
+                  <li><strong>Project:</strong> ${project.name}</li>
+                  <li><strong>Document Type:</strong> ${
+                    currentDocument.type
+                  }</li>
+                  <li><strong>Document ID:</strong> ${currentDocument.id}</li>
+                  <li><strong>Client Email ID:</strong> ${email.id}</li>
+                  <li><strong>Failed At:</strong> ${new Date().toLocaleString()}</li>
+                </ul>
+              </div>
+
+              <div class="error-box">
+                <h3>❌ Error Details</h3>
+                <p><strong>Error Message:</strong> ${error.message}</p>
+                <p><strong>Correlation ID:</strong> ${correlationId}</p>
+                <p><strong>Client Feedback Summary:</strong> ${
+                  intentResult.summary || "No summary available"
+                }</p>
+              </div>
+
+              <div class="action-required">
+                <h3>⚠️ Action Required</h3>
+                <p><strong>Manual intervention is required to regenerate the document.</strong></p>
+                
+                <h4>Options:</h4>
+                <ol>
+                  <li><strong>Retry via UI:</strong> Use the admin panel to manually trigger document regeneration</li>
+                  <li><strong>Contact Developer:</strong> If the issue persists, contact the development team with the correlation ID above</li>
+                  <li><strong>Manual Process:</strong> Handle the client feedback manually by editing the document directly</li>
+                </ol>
+              </div>
+
+              <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <h4>📧 Client Feedback Context</h4>
+                <p><strong>From:</strong> ${email.from}</p>
+                <p><strong>Subject:</strong> ${
+                  email.subject || "(no subject)"
+                }</p>
+                <p><strong>Intent Confidence:</strong> ${Math.round(
+                  (intentResult.confidence || 0) * 100
+                )}%</p>
+                <p><strong>Requested Changes:</strong> ${
+                  intentResult.requestedChanges?.length || 0
+                } changes detected</p>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <p><small>This is an automated error notification from Levitate Studios AI Agent.</small></p>
+              <p><small>The document status has been updated to CLIENT_FEEDBACK for manual handling.</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated document regeneration failure template",
+        projectId: project?.id,
+        documentId: currentDocument?.id,
+        emailId: email?.id,
+        correlationId,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate document regeneration failure template",
+        error: error.message,
+        projectId: project?.id,
+        documentId: currentDocument?.id,
+        emailId: email?.id,
+        correlationId,
+      });
+      throw error;
+    }
   }
 
   /**
