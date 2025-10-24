@@ -54,7 +54,7 @@ app.use(securityHeaders);
 
 // Special middleware for webhook routes - preserve raw body for ALL apps-script endpoints
 app.use(
-  ["/api/webhooks/", "/api/v1/webhooks/"],
+  ["/api/webhooks/", "/api/v1/webhooks/apps-script/forms"],
   express.raw({
     type: "application/json",
     limit: "50mb",
