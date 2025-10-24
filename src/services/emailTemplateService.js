@@ -481,7 +481,9 @@ class EmailTemplateService {
               </div>
 
               <div style="text-align: center; margin: 30px 0;">
-                <a href="${reviewUrl}" class="btn btn-primary" style="color: white;">
+                <a href="${
+                  documentResult.webViewLink
+                }" class="btn btn-primary" style="color: white;">
                   <span class="icon">🔍</span>Review Regenerated Document
                 </a>
                 <a href="${sendToClientUrl}" class="btn btn-success" style="color: white;">
@@ -1131,13 +1133,15 @@ class EmailTemplateService {
    * @param {Object} brevoItem - Brevo email item
    * @param {Object} emailRecord - Email database record
    * @param {Array} attachmentLinks - Array of Google Drive attachment links
+   * @param {Array} conversationHistory - Array of previous emails in the conversation for context
    * @returns {Object} Email template
    */
   static generateAdminInboundEmailNotificationTemplate(
     project,
     brevoItem,
     emailRecord,
-    attachmentLinks = []
+    attachmentLinks = [],
+    conversationHistory = []
   ) {
     const emailContent =
       brevoItem.ExtractedMarkdownMessage || brevoItem.RawTextBody || "";
@@ -1183,6 +1187,97 @@ class EmailTemplateService {
     `
         : "";
 
+    // Helper function to escape HTML to prevent XSS
+    const escapeHtml = (text) => {
+      if (!text || typeof text !== "string") return text;
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+    };
+
+    // Generate conversation history HTML
+    const conversationHistoryHtml =
+      conversationHistory && conversationHistory.length > 0
+        ? `
+    <div style="margin-bottom: 20px;">
+      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">📋 Recent Conversation History (${
+        conversationHistory.length
+      } previous emails):</h2>
+      <div style="background-color: #f8f9fa; border-radius: 5px; padding: 15px; max-height: 400px; overflow-y: auto;">
+        ${conversationHistory
+          .map((email, index) => {
+            const emailDate = new Date(email.receivedAt).toLocaleDateString(
+              "en-NG",
+              {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              }
+            );
+
+            const directionIcon = email.direction === "OUTBOUND" ? "📤" : "📥";
+            const directionColor =
+              email.direction === "OUTBOUND" ? "#28a745" : "#007bff";
+
+            // Truncate long email content for readability and handle null/undefined safely
+            const truncatedContent =
+              email.textBody &&
+              typeof email.textBody === "string" &&
+              email.textBody.trim().length > 0
+                ? email.textBody.length > 200
+                  ? email.textBody.substring(0, 200) + "..."
+                  : email.textBody
+                : "(no content)";
+
+            return `
+        <div style="border-left: 3px solid ${directionColor}; padding-left: 10px; margin-bottom: 15px; ${
+              index === conversationHistory.length - 1
+                ? "margin-bottom: 0;"
+                : ""
+            }">
+          <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <span style="margin-right: 8px;">${directionIcon}</span>
+            <strong style="color: ${directionColor}; margin-right: 10px;">${
+              email.direction
+            }</strong>
+            <span style="font-size: 12px; color: #666; margin-right: 10px;">${emailDate}</span>
+            ${
+              email.intent && email.intent !== "NONE"
+                ? `<span style="background-color: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #495057;">Intent: ${escapeHtml(
+                    email.intent
+                  )}</span>`
+                : ""
+            }
+          </div>
+          <div style="font-size: 13px; color: #495057; margin-bottom: 3px;">
+            <strong>From:</strong> ${
+              escapeHtml(email.fromAddr) || "(unknown sender)"
+            }
+          </div>
+          <div style="font-size: 13px; color: #495057; margin-bottom: 8px;">
+            <strong>Subject:</strong> ${escapeHtml(
+              email.subject && email.subject.trim()
+                ? email.subject
+                : "(no subject)"
+            )}
+          </div>
+          <div style="font-size: 12px; color: #6c757d; font-family: 'Courier New', monospace; white-space: pre-wrap; background-color: #ffffff; padding: 8px; border-radius: 3px; border: 1px solid #dee2e6;">${escapeHtml(
+            truncatedContent
+          )}</div>
+        </div>
+              `;
+          })
+          .join("")}
+      </div>
+    </div>
+    `
+        : "";
+
     const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -1215,11 +1310,13 @@ class EmailTemplateService {
     </div>
 
     <div style="margin-bottom: 20px;">
-      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">Message Content:</h2>
+      <h2 style="color: #0a0a0a; font-size: 18px; margin-bottom: 10px;">📧 Current Message Content:</h2>
       <div style="background-color: #ffffff; border-left: 4px solid #0a0a0a; padding: 15px; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 14px;">${emailContent}</div>
     </div>
-
+    
     ${attachmentsHtml}
+
+    ${conversationHistoryHtml}
 
     <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-top: 20px;">
       <p style="margin: 0; font-size: 14px;">

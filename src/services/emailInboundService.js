@@ -632,13 +632,63 @@ class EmailInboundService {
         );
       }
 
+      // Step 6: Get conversation history for context (last 5 emails excluding current)
+      let conversationHistory = [];
+      try {
+        const emailThread = await prisma.emailThread.findUnique({
+          where: { id: emailRecord.threadId },
+          include: {
+            emails: {
+              where: {
+                id: { not: emailRecord.id }, // Exclude current email
+              },
+              orderBy: { receivedAt: "desc" },
+              take: 5, // Last 5 emails for context
+              select: {
+                id: true,
+                direction: true,
+                fromAddr: true,
+                subject: true,
+                textBody: true,
+                receivedAt: true,
+                intent: true,
+              },
+            },
+          },
+        });
+
+        conversationHistory = emailThread?.emails || [];
+
+        logger.info(
+          {
+            emailId: emailRecord.id,
+            threadId: emailRecord.threadId,
+            conversationHistoryCount: conversationHistory.length,
+            correlationId,
+          },
+          "Retrieved conversation history for admin notification"
+        );
+      } catch (historyError) {
+        logger.warn(
+          {
+            emailId: emailRecord.id,
+            threadId: emailRecord.threadId,
+            error: historyError.message,
+            correlationId,
+          },
+          "Failed to retrieve conversation history - continuing without it"
+        );
+        // Continue without conversation history - not critical for notification
+      }
+
       // Generate email template using EmailTemplateService
       const emailTemplate =
         EmailTemplateService.generateAdminInboundEmailNotificationTemplate(
           project,
           brevoItem,
           emailRecord,
-          attachmentLinks
+          attachmentLinks,
+          conversationHistory
         );
 
       // Send email with attachments
