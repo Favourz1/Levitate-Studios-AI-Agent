@@ -86,7 +86,14 @@ class EmailTemplateService {
           <li><strong>Project:</strong> ${project.name}</li>
           <li><strong>Client:</strong> ${project.client?.name || "N/A"}</li>
           <li><strong>Phase:</strong> ${project.phase || "N/A"}</li>
-          <li><strong>Initialized:</strong> ${new Date().toISOString()}</li>
+          <li><strong>Initialized:</strong> ${new Date().toLocaleDateString(
+            "en-NG",
+            {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }
+          )}</li>
         </ul>
         
         <h3>Project Resources</h3>
@@ -136,7 +143,14 @@ class EmailTemplateService {
           <li><strong>Project:</strong> ${project.name}</li>
           <li><strong>Client:</strong> ${project.client?.name || "N/A"}</li>
           <li><strong>Document Type:</strong> ${documentTypeName}</li>
-          <li><strong>Created:</strong> ${new Date().toISOString()}</li>
+          <li><strong>Created:</strong> ${new Date().toLocaleDateString(
+            "en-NG",
+            {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }
+          )}</li>
         </ul>
         
         <h3>Next Steps</h3>
@@ -246,7 +260,14 @@ class EmailTemplateService {
                   <li><strong>Project:</strong> ${project.name}</li>
                   <li><strong>Document:</strong> Brand Origin / Creative Brief</li>
                   <li><strong>Status:</strong> <span style="background: #ffc107; color: #212529; padding: 2px 8px; border-radius: 12px; font-size: 12px;">DRAFT</span></li>
-                  <li><strong>Created:</strong> ${new Date().toLocaleString()}</li>
+                  <li><strong>Created:</strong> ${new Date().toLocaleDateString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    }
+                  )}</li>
                 </ul>
               </div>
 
@@ -732,7 +753,14 @@ class EmailTemplateService {
                 <ul style="list-style: none; padding: 0;">
                   <li><strong>Project:</strong> ${project.name}</li>
                   <li><strong>Document Type:</strong> ${documentTypeName}</li>
-                  <li><strong>Created:</strong> ${new Date().toLocaleDateString()}</li>
+                  <li><strong>Created:</strong> ${new Date().toLocaleDateString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    }
+                  )}</li>
                   <li><strong>Format:</strong> PDF Attachment</li>
                 </ul>
               </div>
@@ -860,7 +888,14 @@ class EmailTemplateService {
                 <li><strong>Project:</strong> ${projectName}</li>
                 <li><strong>Client:</strong> ${clientName}</li>
                 <li><strong>Document Type:</strong> ${documentType}</li>
-                <li><strong>Completed:</strong> ${new Date().toLocaleString()}</li>
+                <li><strong>Completed:</strong> ${new Date().toLocaleDateString(
+                  "en-NG",
+                  {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  }
+                )}</li>
               </ul>
 
               <p><strong>Next Steps:</strong> The client will receive the document and can reply with feedback or acceptance. Admin (${
@@ -1036,7 +1071,14 @@ class EmailTemplateService {
               <div class="link-box">
                 <p style="margin: 0;"><strong>Project:</strong> ${projectName}</p>
                 <p style="margin: 5px 0;"><strong>Document:</strong> ${documentType}</p>
-                <p style="margin: 5px 0 0 0;"><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+                <p style="margin: 5px 0 0 0;"><strong>Generated:</strong> ${new Date().toLocaleDateString(
+                  "en-NG",
+                  {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  }
+                )}</p>
               </div>
 
               <div style="text-align: center; margin: 20px 0;">
@@ -1165,7 +1207,11 @@ class EmailTemplateService {
       }</p>
       <p style="margin: 5px 0;"><strong>Received:</strong> ${new Date(
         brevoItem.SentAtDate || Date.now()
-      ).toLocaleString()}</p>
+      ).toLocaleDateString("en-NG", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })}</p>
     </div>
 
     <div style="margin-bottom: 20px;">
@@ -1256,7 +1302,14 @@ class EmailTemplateService {
                   }</li>
                   <li><strong>Document ID:</strong> ${currentDocument.id}</li>
                   <li><strong>Client Email ID:</strong> ${email.id}</li>
-                  <li><strong>Failed At:</strong> ${new Date().toLocaleString()}</li>
+                  <li><strong>Failed At:</strong> ${new Date().toLocaleDateString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    }
+                  )}</li>
                 </ul>
               </div>
 
