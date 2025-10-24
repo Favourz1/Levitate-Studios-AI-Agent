@@ -334,7 +334,6 @@ class EmailInboundService {
             clientId,
             replyToAddress: toAddress,
             providerThreadId: item.InReplyTo || item.MessageId,
-            createdAt: new Date(),
           },
         });
 
@@ -379,12 +378,11 @@ class EmailInboundService {
                 }
               : null,
             brevoEventId: item.Uuid?.[0] || null,
-            receivedAt: new Date(item.SentAtDate || Date.now()),
+            receivedAt: item.SentAtDate ? new Date(item.SentAtDate) : undefined,
             intent: "NONE", // Will be updated by intent detection worker
             intentConfidence: 0,
             llmTraceId: null,
             processed: false,
-            createdAt: new Date(),
           },
         });
 
@@ -402,7 +400,6 @@ class EmailInboundService {
               hasAttachments: !!item.Attachments?.length,
               correlationId,
             },
-            at: new Date(),
           },
         });
 
