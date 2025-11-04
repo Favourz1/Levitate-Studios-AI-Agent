@@ -629,7 +629,7 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
       },
     });
 
-    // TODO: Any intent that the *intentResult.confidence* is less then 0.7 send to admin and PM and they manyally confirm - dont take automatic action
+    // TODO: Any intent that the *intentResult.confidence* is less then 0.5 send to admin and PM and they manually confirm - dont take automatic action
 
     // If no action required, we're done
     if (!requiresAction) {
@@ -964,9 +964,6 @@ async function handleRejectIntent(context, intentResult, correlationId) {
       },
       "Document/Project rejected by client - PM review required"
     );
-
-    // TODO: Notify PM about rejection
-    // TODO: Consider moving project to REJECTED phase (requires PM approval)
 
     return {
       actionTaken: true,
