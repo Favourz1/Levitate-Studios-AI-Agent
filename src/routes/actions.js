@@ -10,10 +10,14 @@ const { authenticateActionToken } = require("@/middleware/auth");
 const { ActionService } = require("@/services/actionService");
 const { DocumentSendingService } = require("@/services/documentSendingService");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
+const {
+  RejectionConfirmationService,
+} = require("@/services/rejectionConfirmationService");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { ValidationError, BaseError } = require("@/utils/errors");
 const { appConfig } = require("@/config");
 const { ActionType, TeamRole } = require("@/constants");
+const { getPrismaClient } = require("@/database");
 
 const router = Router();
 const logger = createLogger("routes:actions");
@@ -445,6 +449,276 @@ router.get(
         },
         "Generate send link action failed"
       );
+
+      return sendErrorResponse(
+        res,
+        error,
+        error instanceof ValidationError ? 400 : 500
+      );
+    }
+  })
+);
+
+/**
+ * GET /actions/confirm-rejection?t=<JWT>
+ * Confirm rejection and execute all required actions
+ */
+router.get(
+  "/confirm-rejection",
+  authenticateActionToken,
+  asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const actionData = req?.actionData; // From authenticateActionToken middleware
+    const correlationId = crypto.randomUUID();
+
+    try {
+      // Extract and validate action data
+      const {
+        documentId,
+        projectId,
+        userId,
+        userEmail,
+        userName,
+        nonce,
+        action,
+        isDocumentLevel,
+        emailId,
+      } = actionData;
+
+      // Validate action type
+      if (action !== ActionType.CONFIRM_REJECTION) {
+        throw new ValidationError(
+          `Invalid action type: ${action}. Expected: ${ActionType.CONFIRM_REJECTION}`
+        );
+      }
+
+      logger.info(
+        {
+          documentId,
+          projectId,
+          userId,
+          userName,
+          isDocumentLevel,
+          nonce,
+          correlationId,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+        "Processing confirm-rejection action"
+      );
+
+      // Step 1: Check for idempotency (prevent duplicate confirmations)
+      const existingAction = await ActionService.checkActionNonce(nonce);
+      if (existingAction) {
+        logger.info(
+          {
+            nonce,
+            processedAt: existingAction.processedAt,
+            correlationId,
+          },
+          "Action already processed (idempotent response)"
+        );
+
+        return sendSuccessResponse(res, {
+          message: "Rejection already confirmed",
+          alreadyProcessed: true,
+          processedAt: existingAction.processedAt,
+          status: existingAction.status,
+          correlationId,
+          processingTime: Date.now() - startTime,
+        });
+      }
+
+      // Step 2: Validate team member permissions
+      await ActionService.validateTeamMemberPermissions(userId, [
+        TeamRole.PROJECT_MANAGER,
+        TeamRole.ADMIN,
+        TeamRole.MANAGER,
+      ]);
+
+      // Step 3: Validate required fields
+      if (!projectId) {
+        throw new ValidationError("Project ID is required");
+      }
+
+      if (isDocumentLevel && !documentId) {
+        throw new ValidationError(
+          "Document ID is required for document-level rejection"
+        );
+      }
+
+      if (!emailId) {
+        throw new ValidationError("Email ID is required");
+      }
+
+      // Step 4: Confirm rejection and execute all required actions
+      const result = await RejectionConfirmationService.confirmRejection({
+        projectId,
+        documentId: isDocumentLevel ? documentId : null,
+        isDocumentLevel: !!isDocumentLevel,
+        userId,
+        userName,
+        userEmail,
+        emailId,
+        correlationId,
+      });
+
+      // Step 5: Mark nonce as used
+      await ActionService.markActionNonceUsed(nonce, correlationId, {
+        action: "CONFIRM_REJECTION",
+        result: "SUCCESS",
+        projectId,
+        documentId,
+        isDocumentLevel,
+        userId,
+      });
+
+      // Step 6: Create audit log entry
+      await ActionService.createAuditLog({
+        projectId,
+        actor: `USER (${userName})`,
+        action: "REJECTION_CONFIRMED_VIA_EMAIL_LINK",
+        details: {
+          documentId,
+          isDocumentLevel,
+          clickedBy: userName,
+          clickedByEmail: userEmail,
+          correlationId,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          nonce,
+        },
+      });
+
+      // Step 7: Get project data for feedback email
+      const prisma = getPrismaClient();
+      const projectData = await prisma.project.findUnique({
+        where: { id: projectId },
+        include: { client: true },
+      });
+
+      // Step 8: Send feedback email to user who clicked
+      try {
+        const feedbackTemplate =
+          EmailTemplateService.generateActionSuccessFeedbackTemplate({
+            to: userEmail,
+            userName,
+            action: `${
+              isDocumentLevel ? "Document" : "Project"
+            } rejection confirmed successfully`,
+            projectName: projectData?.name || `Project ${projectId}`,
+            clientName: projectData?.client?.name || "N/A",
+            documentType: isDocumentLevel ? "Document" : "Project",
+            correlationId,
+          });
+
+        await brevoIntegration.sendTransactionalEmail({
+          to: [userEmail],
+          subject: feedbackTemplate.subject,
+          htmlContent: feedbackTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            userEmail,
+            userName,
+            correlationId,
+          },
+          "Success feedback email sent to user"
+        );
+      } catch (feedbackError) {
+        logger.error(
+          {
+            userEmail,
+            userName,
+            error: feedbackError.message,
+            correlationId,
+          },
+          "Failed to send success feedback email"
+        );
+      }
+
+      // Step 8: Return success response
+      const duration = Date.now() - startTime;
+
+      logger.info(
+        {
+          projectId,
+          documentId,
+          isDocumentLevel,
+          userName,
+          duration,
+          correlationId,
+        },
+        "Confirm-rejection action completed successfully"
+      );
+
+      return sendSuccessResponse(res, {
+        message: result.message,
+        projectId,
+        documentId,
+        isDocumentLevel,
+        projectPhase: result.projectPhase,
+        confirmedAt: new Date().toISOString(),
+        correlationId,
+        processingTime: duration,
+      });
+    } catch (error) {
+      const duration = Date.now() - startTime;
+
+      logger.error(
+        {
+          documentId: actionData?.documentId,
+          projectId: actionData?.projectId,
+          userId: actionData?.userId,
+          userName: actionData?.userName,
+          error: error.message,
+          errorType: error.constructor.name,
+          correlationId,
+          duration,
+          stack: error.stack,
+        },
+        "Confirm-rejection action failed"
+      );
+
+      // Send error feedback email to user
+      if (actionData?.userEmail && actionData?.userName) {
+        try {
+          const errorTemplate =
+            EmailTemplateService.generateActionErrorFeedbackTemplate({
+              to: actionData.userEmail,
+              userName: actionData.userName,
+              action: "Confirm rejection",
+              error: error.message,
+              correlationId,
+            });
+
+          await brevoIntegration.sendTransactionalEmail({
+            to: [actionData.userEmail],
+            subject: errorTemplate.subject,
+            htmlContent: errorTemplate.htmlContent,
+          });
+
+          logger.info(
+            {
+              userEmail: actionData.userEmail,
+              userName: actionData.userName,
+              correlationId,
+            },
+            "Error feedback email sent to user"
+          );
+        } catch (feedbackError) {
+          logger.error(
+            {
+              userEmail: actionData.userEmail,
+              userName: actionData.userName,
+              feedbackError: feedbackError.message,
+              correlationId,
+            },
+            "Failed to send error feedback email"
+          );
+        }
+      }
 
       return sendErrorResponse(
         res,

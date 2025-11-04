@@ -11,12 +11,14 @@ const { brevoIntegration } = require("@/integrations/brevo");
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
+const { ActionService } = require("@/services/actionService");
 const {
   EmailIntent,
   DocumentStatus,
   ProjectPhase,
   AuditActions,
   DocumentType,
+  ActionType,
 } = require("@/constants");
 const { QueueService } = require("@/queues");
 const { appConfig } = require("@/config");
@@ -926,51 +928,64 @@ async function handleRejectIntent(context, intentResult, correlationId) {
       "Handling REJECT intent"
     );
 
-    // Update document status if there's an active document
-    if (currentDocument) {
-      await prisma.document.update({
-        where: { id: currentDocument.id },
-        data: {
-          status: DocumentStatus.REJECTED,
-          updatedAt: new Date(),
-        },
-      });
-    }
+    // Determine if this is document-level or project-level rejection
+    // If there's a current document, it's likely document-level rejection
+    // Otherwise, it's project-level rejection
+    const isDocumentLevel = !!currentDocument;
 
-    // Create audit log
+    // Note: Document status update will be handled by the confirm-rejection API
+    // when PM/Admin clicks the "Confirm Rejection" button
+
+    // Create audit log for rejection detection
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
         actor: `CLIENT (${email.from}) - DETECTED INTENT`,
-        action: "DOCUMENT_REJECTED",
+        action: isDocumentLevel
+          ? AuditActions.DOCUMENT_REJECTED
+          : AuditActions.PROJECT_REJECTED,
         details: {
           emailId: email.id,
           documentId: currentDocument?.id,
           documentType: currentDocument?.type,
           summary: intentResult.summary,
           reasoning: intentResult.reasoning,
+          isDocumentLevel,
+          confidence: intentResult.confidence,
+          clientSentiment: intentResult.clientSentiment,
+          urgency: intentResult.urgency,
           correlationId,
         },
         at: new Date(),
       },
     });
 
+    // Send notification emails to PM and Admin with action buttons
+    await sendRejectionNotificationEmails(
+      context,
+      intentResult,
+      correlationId,
+      isDocumentLevel
+    );
+
     logger.info(
       {
         emailId: email.id,
         projectId: project.id,
         documentId: currentDocument?.id,
+        isDocumentLevel,
         correlationId,
       },
-      "Document/Project rejected by client - PM review required"
+      "Rejection detected - Notification emails sent to PM and Admin"
     );
 
     return {
       actionTaken: true,
       intent: EmailIntent.REJECT,
-      message: "Rejection detected - PM review required",
+      message: "Rejection detected - Notification emails sent to PM and Admin",
       documentId: currentDocument?.id,
-      documentStatus: currentDocument ? DocumentStatus.REJECTED : null,
+      documentStatus: currentDocument ? currentDocument.status : null, // Return current status, not REJECTED
+      isDocumentLevel,
     };
   } catch (error) {
     logger.error(
@@ -982,6 +997,172 @@ async function handleRejectIntent(context, intentResult, correlationId) {
       "Failed to handle REJECT intent"
     );
     throw error;
+  }
+}
+
+/**
+ * Send rejection notification emails to PM and Admin
+ * @param {Object} context - Email context
+ * @param {Object} intentResult - Intent detection result
+ * @param {string} correlationId - Correlation ID for tracking
+ * @param {boolean} isDocumentLevel - Whether this is document-level or project-level rejection
+ * @returns {Promise<void>}
+ */
+async function sendRejectionNotificationEmails(
+  context,
+  intentResult,
+  correlationId,
+  isDocumentLevel
+) {
+  try {
+    const { project, currentDocument, email } = context;
+
+    // Get PM and Admin users
+    const pmUser = await AsanaPendingProjectsService.getPMUser(project.id);
+
+    const recipients = [];
+    if (pmUser && pmUser.email) {
+      recipients.push({
+        email: pmUser.email,
+        name: pmUser.name,
+        role: "PM",
+        userId: pmUser.id,
+      });
+    }
+
+    if (appConfig.server.adminEmail) {
+      // Find admin user for tokens
+      const adminUser = await prisma.teamMember.findFirst({
+        where: {
+          email: appConfig.server.adminEmail,
+          isActive: true,
+        },
+      });
+
+      if (adminUser) {
+        recipients.push({
+          email: adminUser.email,
+          name: adminUser.name,
+          role: "Admin",
+          userId: adminUser.id,
+        });
+      } else {
+        // Fallback: add admin email even if not in team members
+        recipients.push({
+          email: appConfig.server.adminEmail,
+          name: "Admin",
+          role: "Admin",
+          userId: null, // Will skip token generation for this recipient
+        });
+      }
+    }
+
+    if (recipients.length === 0) {
+      logger.warn(
+        {
+          projectId: project.id,
+          correlationId,
+        },
+        "No recipients found for rejection notification"
+      );
+      return;
+    }
+
+    // Generate action tokens for each recipient
+    for (const recipient of recipients) {
+      try {
+        // Skip token generation if userId is not available
+        let confirmRejectionToken = null;
+        if (recipient.userId) {
+          const actionToken = await ActionService.createActionToken(
+            {
+              action: ActionType.CONFIRM_REJECTION,
+              documentId: currentDocument?.id || 0, // Use 0 if no document
+              projectId: project.id,
+              userId: recipient.userId,
+              userEmail: recipient.email,
+              userName: recipient.name,
+              isDocumentLevel,
+              emailId: email.id,
+            },
+            "72h" // Longer expiration for rejection confirmation
+          );
+          confirmRejectionToken = actionToken.token;
+        }
+
+        const actionTokens = {
+          confirmRejectionToken,
+        };
+
+        // Generate email template
+        const emailTemplate =
+          EmailTemplateService.generateDetectedRejectionNotificationTemplate(
+            project,
+            currentDocument,
+            email,
+            intentResult,
+            actionTokens,
+            isDocumentLevel
+          );
+
+        // Send email
+        await brevoIntegration.sendTransactionalEmail({
+          to: [recipient.email],
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            projectId: project.id,
+            correlationId,
+          },
+          "Rejection notification email sent successfully"
+        );
+      } catch (emailError) {
+        logger.error(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            emailError: emailError.message,
+            projectId: project.id,
+            correlationId,
+          },
+          "Failed to send rejection notification email"
+        );
+        // Continue with other recipients even if one fails
+      }
+    }
+
+    // Create audit log for notification
+    await prisma.auditLog.create({
+      data: {
+        projectId: project.id,
+        actor: "SYSTEM (Intent Detection)",
+        action: "REJECTION_NOTIFICATION_SENT",
+        details: {
+          emailId: email.id,
+          documentId: currentDocument?.id,
+          isDocumentLevel,
+          recipientsNotified: recipients.map((r) => r.email),
+          correlationId,
+        },
+        at: new Date(),
+      },
+    });
+  } catch (error) {
+    logger.error(
+      {
+        projectId: context.project.id,
+        error: error.message,
+        correlationId,
+      },
+      "Failed to send rejection notification emails"
+    );
+    // Don't throw - this shouldn't fail the main intent handling
+    // The document status has already been updated and audit log created
   }
 }
 

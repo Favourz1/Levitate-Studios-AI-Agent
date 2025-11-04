@@ -1481,6 +1481,267 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate rejection notification email template for PM and Admin
+   * @param {Object} project - Project data
+   * @param {Object} currentDocument - Current document data (if document-level rejection)
+   * @param {Object} email - Email data from client
+   * @param {Object} intentResult - Intent detection result
+   * @param {Object} actionTokens - Action tokens for buttons
+   * @param {boolean} isDocumentLevel - Whether this is a document-level or project-level rejection
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateDetectedRejectionNotificationTemplate(
+    project,
+    currentDocument,
+    email,
+    intentResult,
+    actionTokens = {},
+    isDocumentLevel = false
+  ) {
+    try {
+      // Helper function to escape HTML to prevent XSS
+      const escapeHtml = (text) => {
+        if (!text || typeof text !== "string") return text || "";
+        return text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#x27;");
+      };
+
+      const rejectionType = isDocumentLevel ? "Document" : "Project";
+      const subject = `🚨 ${rejectionType} Rejection Detected - ${escapeHtml(
+        project.client?.name || "Client"
+      )} - ${escapeHtml(project.name)}`;
+
+      const confirmRejectionUrl = actionTokens.confirmRejectionToken
+        ? `${appConfig.server.baseUrl}/api/v1/actions/confirm-rejection?t=${actionTokens.confirmRejectionToken}`
+        : "#";
+
+      const regenerateDocUrl = isDocumentLevel
+        ? `${appConfig.server.frontendUrl}/admin/projects/${project.id}/documents/${currentDocument.id}/regenerate`
+        : null;
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: white; padding: 30px; border: 1px solid #e1e5e9; }
+            .footer { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; }
+            .btn { display: inline-block; padding: 12px 24px; margin: 10px 5px; text-decoration: none; border-radius: 5px; font-weight: 600; text-align: center; }
+            .btn-danger { background-color: #dc3545; color: white; }
+            .btn-primary { background-color: #007bff; color: white; }
+            .btn:hover { opacity: 0.9; }
+            .project-info { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .rejection-info { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #ffc107; }
+            .intent-details { background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #dc3545; }
+            .icon { font-size: 24px; margin-right: 10px; }
+            .action-required { background: #e3f2fd; padding: 20px; border-radius: 8px; border-left: 4px solid #2196f3; margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1><span class="icon">🚨</span>${rejectionType} Rejection Detected</h1>
+              <p>Client has rejected the ${
+                isDocumentLevel ? "document" : "project"
+              }</p>
+            </div>
+            
+            <div class="content">
+              <div class="project-info">
+                <h3>📋 Project Details</h3>
+                <ul style="list-style: none; padding: 0;">
+                  <li><strong>Client:</strong> ${escapeHtml(
+                    project.client?.name || "Unknown Client"
+                  )}</li>
+                  <li><strong>Project:</strong> ${escapeHtml(project.name)}</li>
+                  <li><strong>Current Phase:</strong> ${escapeHtml(
+                    project.phase
+                  )}</li>
+                  ${
+                    isDocumentLevel && currentDocument
+                      ? `<li><strong>Document Type:</strong> ${escapeHtml(
+                          currentDocument.type
+                        )}</li>
+                         <li><strong>Document Status:</strong> ${escapeHtml(
+                           currentDocument.status
+                         )}</li>`
+                      : ""
+                  }
+                  <li><strong>Detected At:</strong> ${new Date().toLocaleDateString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }
+                  )}</li>
+                </ul>
+              </div>
+
+              <div class="intent-details">
+                <h3>🤖 AI Intent Detection Results</h3>
+                <ul style="list-style: none; padding: 0;">
+                  <li><strong>Detected Intent:</strong> REJECT</li>
+                  <li><strong>Confidence Level:</strong> ${Math.round(
+                    (intentResult.confidence || 0) * 100
+                  )}%</li>
+                  <li><strong>Summary:</strong> ${escapeHtml(
+                    intentResult.summary || "No summary available"
+                  )}</li>
+                  <li><strong>Client Sentiment:</strong> ${escapeHtml(
+                    intentResult.clientSentiment || "Not analyzed"
+                  )}</li>
+                  <li><strong>Urgency Level:</strong> ${escapeHtml(
+                    intentResult.urgency || "Not specified"
+                  )}</li>
+                </ul>
+              </div>
+
+              <div class="rejection-info">
+                <h3>💬 Client Rejection Details</h3>
+                <p><strong>From:</strong> ${escapeHtml(
+                  email.fromAddr || email.from || "Unknown"
+                )}</p>
+                <p><strong>Subject:</strong> ${escapeHtml(
+                  email.subject || "(no subject)"
+                )}</p>
+                <p><strong>Received:</strong> ${new Date(
+                  email.receivedAt
+                ).toLocaleDateString("en-NG", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}</p>
+                
+                <div style="background: #ffffff; padding: 15px; border-radius: 5px; margin: 15px 0; border: 1px solid #dee2e6;">
+                  <h4>Detected Client's Intent Reasoning:</h4>
+                  <p style="white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 13px;">${escapeHtml(
+                    intentResult.reasoning ||
+                      intentResult.summary ||
+                      "No reasoning provided"
+                  )}</p>
+                </div>
+
+                ${
+                  intentResult.requestedChanges &&
+                  intentResult.requestedChanges.length > 0
+                    ? `
+                <div style="background: #ffffff; padding: 15px; border-radius: 5px; margin: 15px 0; border: 1px solid #dee2e6;">
+                  <h4>Specific Concerns Mentioned:</h4>
+                  <ol>
+                    ${intentResult.requestedChanges
+                      .map(
+                        (change, index) =>
+                          `<li><strong>${
+                            change.section
+                              ? `[${escapeHtml(change.section)}]`
+                              : "[General]"
+                          }</strong> ${escapeHtml(change.change)}</li>`
+                      )
+                      .join("")}
+                  </ol>
+                </div>
+                `
+                    : ""
+                }
+              </div>
+
+              <div class="action-required">
+                <h3>⚠️ Action Required</h3>
+                <p><strong>Please review the rejection and confirm the appropriate action:</strong></p>
+                
+                <ol>
+                  <li><strong>Review</strong> the client's feedback and reasoning above</li>
+                  <li><strong>Confirm Rejection</strong> to officially mark the ${
+                    isDocumentLevel ? "document" : "project"
+                  } as rejected</li>
+                  ${
+                    isDocumentLevel
+                      ? `<li><strong>Regenerate Document</strong> if you want to create a new version based on client feedback</li>`
+                      : ""
+                  }
+                </ol>
+
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${confirmRejectionUrl}" class="btn btn-danger" style="color: white;">
+                    <span class="icon">✅</span>Confirm Rejection
+                  </a>
+                  ${
+                    isDocumentLevel && regenerateDocUrl
+                      ? `<a href="${regenerateDocUrl}" class="btn btn-primary" style="color: white;" target="_blank">
+                          <span class="icon">🔄</span>Regenerate Document
+                        </a>`
+                      : ""
+                  }
+                </div>
+
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                  <p style="margin: 0;"><strong>📝 Note:</strong> Clicking "Confirm Rejection" will:</p>
+                  <ul style="margin: 10px 0;">
+                    <li>Mark the ${
+                      isDocumentLevel ? "document" : "project"
+                    } as rejected</li>
+                    ${
+                      !isDocumentLevel
+                        ? `<li>Update project phase to REJECTED</li>`
+                        : ""
+                    }
+                    <li>Move Asana task to "Rejected" section</li>
+                    <li>Add comment to Asana task with PM notification</li>
+                    <li>Create comprehensive audit log entry</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
+              <p><small>The AI detected client intent with ${Math.round(
+                (intentResult.confidence || 0) * 100
+              )}% confidence. Please review and take appropriate action.</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated rejection notification template",
+        projectId: project?.id,
+        documentId: currentDocument?.id,
+        isDocumentLevel,
+        intentConfidence: intentResult.confidence,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate rejection notification template",
+        error: error.message,
+        projectId: project?.id,
+        documentId: currentDocument?.id,
+        isDocumentLevel,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Sanitize template content to prevent XSS
    * @param {string} content - Content to sanitize
    * @returns {string} Sanitized content
