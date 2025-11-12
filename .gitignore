@@ -144,5 +144,7 @@ src/config/iam.json
 # Dev only Files
 scripts/seed-team-members.js
 email_response.json
+rateCard.json
 
-AI-Context
+AI-Context/example system prompts
+AI-Context/questionaire and brand origin docs
