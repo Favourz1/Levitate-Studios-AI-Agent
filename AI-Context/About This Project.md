@@ -1,4 +1,4 @@
-- Finishing from questionnaire to brand guidelines document to finalizing project to aggregating budget to landing the project
+- Finishing from questionnaire to brand guidelines document to finalizing project to quote document to landing the project
 
 Step 1: Client fills questionnaire
 
@@ -6,7 +6,7 @@ Step 1: Client fills questionnaire
 
 * We should inform the PM in email and we have a ‘Pending Projects’ project in asana where the new pending project will be created as a task and PM assigned to it.
 
-- In our db we store the ‘Pending Projects’ project id but we also have code to check if it exists in db else create and save in db to ensure other actions in code doesn’t break. The ‘Pending Projects’ project with a board that has this columns
+- In our db we store the 'Pending Projects' project id but we also have code to check if it exists in db else create and save in db to ensure other actions in code doesn't break. The 'Pending Projects' project with a board that has this columns
   Filled Questionaire,
   Brand Origin Doc Phase,
   Budget/Timeline Phase,
@@ -31,21 +31,21 @@ Step 4: In the inbound email listener, when a new email is received, we detect c
 
 - So we need to track status of document and changes, we also need to track status/current phase of client project.
 
-Step 5: If you detect that Brand origin document is accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to PM and Finance Manager to confirm with a button in email (any of them can click must not be both) and when clicked starts cron job for creating the Budget/Timeline document (if cron job already in process don’t rerun incase both click button same time) and when document complete move project to “Budget/Timeline Phase” column in ‘Pending Projects’ board (You only send confirmation email to PM if not clicked from Admin UI i.e accepted status wasn’t API triggered but detected intent from email)
+Step 5: If you detect that Brand origin document is accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to Finance Manager and Admin to confirm with a button in email (any of them can click must not be both) and when clicked starts cron job for creating the Quote document via ERP software API (if cron job already in process don't rerun incase both click button same time) and when document complete move project to "Budget/Timeline Phase" column in 'Pending Projects' board (You only send confirmation email to Finance Manager and Admin if not clicked from Admin UI i.e accepted status wasn't API triggered but detected intent from email)
 
-- Also add new comment on task and tag PM & Finance Manager that “Budget/Timeline” document created telling both to go to email to review or send to client.
-- The email notification will have a ‘Review’ button and ‘Send to Client’ button. On click of review they can make changes to the document and come back to email/or still in UI to click “Send To Client’
+- We store the Quote ID returned from the ERP software API in our db.
+- Also add new comment on task and tag Finance Manager that "Quote" document created telling person to go to email to review or send to client but don't attach the link to quote document in the asana task comment.
+- The email notification will have a 'View' button and 'Send to Client' and "manage" button. On click of view they go to link of quotes document that has been uploaded to drive and can come back to email/or still in UI to click "Send To Client', manage button just go to UI.
 
-- Notice PM & Finance manager can access and make changes to the document since both are informed via emails, so we need a way for documents to be properly synced like Google docs works.
-- Example Budget/Timeline Document and rules in creating one will be given as context.
+- Example Quote Document, rate card and rules in creating one will be given as context.
 
-- In the Email sent to PM & Finance Manager, We also create 3 variations of ideal Budget & Timeline document and attach links in email as suggestions based on the context and rules given to AI on creating this document and details/context of client data. These variation documents are only created once for this Budget/Timeline document; we don't recreate variations in any subsequent modification to the document based on email listener that detects intent and decides to create, we only recreate original Budget/Timeline document based on detected intent if need be.
+- In the Email sent to Admin & Finance Manager, We also create 3 variations of ideal Quote document via ERP software API and attach links in email as suggestions based on the context and rules given to AI on creating this document and details/context of client data. We store the variant IDs returned from the ERP software API in our db. These variation documents are only created once for this Quote document initial generation; we don't recreate variations in any subsequent modification to the document based on email listener that detects intent and decides to create, we only recreate Quote document based on detected intent if need be and choose based on the selected variant sent to client.
 
-Step 6: In the email listener, when a new email is received, we detect cient ID from email to identify client from db and if detected intent is a rework/modification to the doc, while ‘Budget/Timeline’ document is not in accepted status, take any email response as feedback to detect intent by LLM and recreate the ‘Budget/timeline’ document if needed and adjust details of budegt/timeline document or know if budget/timeline document is accepted by client or know if intent is a conversation not related to the document sent etc. Then if the detected intent is relating to modification to the document then repeat Step 5 - 6 till ‘Budget/timeline’ document is in accepted status by client then proceed to step 7.
+Step 6: In the email listener, when a new email is received, we detect cient ID from email to identify client from db and if detected intent is a rework/modification to the doc, while 'Quote' document is not in accepted status, take any email response as feedback to detect intent by LLM and recreate the 'Quote' document via ERP software API if needed and adjust details of quote document or know if quote document is accepted by client or know if intent is a conversation not related to the document sent etc. Then if the detected intent is relating to modification to the document then repeat Step 5 - 6 till 'Quote' document is in accepted status by client then proceed to step 7.
 
 - So we need to track status of document and changes, we also need to track status/current phase of client project.
 
-Step 7: If you detect that Budget /Timeline document accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to PM and Finance Manager to confirm with a button in email and when clicked starts move the project task on ‘Pending Project’ project board to “Finalized” column. (You only send confirmation email to PM and Finance Manager if not clicked from Admin UI i.e accepted status wasn’t API triggered but detected intent from email)
+Step 7: If you detect that Quote document accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to Admin and Finance Manager to confirm with a button in email and when clicked starts move the project task on 'Pending Project' project board to "Finalized" column. (You only send confirmation email to Admin and Finance Manager if not clicked from Admin UI i.e accepted status wasn't API triggered but detected intent from email)
 
 - You also start cron job for creating project on asana (This signifies the project is kicking of officially as an actual project and has ben secured)
 - We would have team member, their roles, asana id, email etc on db one or more people can be on a role for example Graphics Designer can be two people but one will have status of Lead so that person would be default assigned on project. Only one team member per role can have a lead status. A team member can have different roles like a Graphics Designer and a web developer.
@@ -58,7 +58,7 @@ Step 7: If you detect that Budget /Timeline document accepted by client based on
 - UI designer (figma)
 - Project manager. - Role:Client relationships & following up with the team. Assigning tasks to team members.
 - Copy writer
-- Digital marketers - role: Create the advertising plan
+- Digital marketers - role: Create the advertising plan / social media marketing
 - Motion graphics design
 - Finance Manager
 
@@ -67,7 +67,7 @@ Step 7: If you detect that Budget /Timeline document accepted by client based on
 
 - You will create and assign tasks to team members on the new project board
 
-- You will take note of the timelines agreed in the accepted “Budget/Timeline” Document to give durations to tasks and assign due date, starting from the current date you initialize the project. Ex: So if you gave logo design two weeks and you initialize the project from 1st of August then logo design task due date will be 14th of August.
+- You will take note of the timelines agreed in the accepted "Quote" Document to give durations to tasks and assign due date, starting from the current date you initialize the project. Ex: So if you gave logo design two weeks and you initialize the project from 1st of August then logo design task due date will be 14th of August.
 
 Step 8: You will create text based guidance to all tasks and add as a comment to the task to help anyone working on the task:
 Ex:
@@ -84,9 +84,10 @@ Step 9: After step 7 and 8 complete send email to Admin and Manager (if anyone o
 
 Note:
 
-1. We should store variations of created brand origin documents and budget/timeline documents for reference purposes and context to LLM to improve on if detected intent from email conversation is to recreate.
+1. We should store variations of created brand origin documents and quote documents for reference purposes and context to LLM to improve on if detected intent from email conversation is to recreate.
 
-- We need the best, cheap/free way of tracking document changes even if it means every version is a new file entirely in backend (Similarly to how Google docs works). But we need this stored and the mechanism stored should allow docs content be accessible to AI.
+- For brand origin documents, we need the best, cheap/free way of tracking document changes even if it means every version is a new file entirely in backend (Similarly to how Google docs works). But we need this stored and the mechanism stored should allow docs content be accessible to AI.
+- For quote documents, we track changes via the ERP software API and store the document IDs and variant IDs in our db for reference and context to LLM.
 
 2. We should store the conversation between the client and Levitate Studios. For better context to AI - Admin can also add more context for that client, uploaded or typed in through UI.
 3. All conversation, messages, context docs, variations of doc created etc. should be stored timestamped when it happened and when created in db so we know order.
