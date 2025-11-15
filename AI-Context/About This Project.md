@@ -48,6 +48,7 @@ Step 6: In the email listener, when a new email is received, we detect cient ID 
 Step 7: If you detect that Quote document accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to Admin and Finance Manager to confirm with a button in email and when clicked starts move the project task on 'Pending Project' project board to "Finalized" column. (You only send confirmation email to Admin and Finance Manager if not clicked from Admin UI i.e accepted status wasn't API triggered but detected intent from email)
 
 - You also start cron job for creating project on asana (This signifies the project is kicking of officially as an actual project and has ben secured)
+- The new project board will have columns: "To Do", "In Progress", "In Review", "Completed"
 - We would have team member, their roles, asana id, email etc on db one or more people can be on a role for example Graphics Designer can be two people but one will have status of Lead so that person would be default assigned on project. Only one team member per role can have a lead status. A team member can have different roles like a Graphics Designer and a web developer.
   This are the roles we know of now but subject to change/modification in the future:
 - Admin (should not be assigned task)
@@ -62,25 +63,13 @@ Step 7: If you detect that Quote document accepted by client based on the email 
 - Motion graphics design
 - Finance Manager
 
-- The new project board will have columns: “To Do”, “In Progress”, “In Review”, “Completed”
-- Not compulsory all team members must be assigned a task on a project, just the specific people, per project.
+- You will use AI to determine which team members to add to the project on Asana based on the project requirements. When deciding on team members to add to project on Asana find: People with skills for that project and people that have lesser work assigned to them.
+- You will add the selected team members to the project on Asana but you will not assign anyone tasks yet.
+- You will also add a project description in the project description in Asana about everything we know about the project to help teams - excluding financials. This should include all context about the client, project requirements, brand guidelines, conversations, and any other relevant information that would help the team understand the project better.
 
-- You will create and assign tasks to team members on the new project board
+Step 8: (More details would be shared later on what would happen after Asana project initialization)
 
-- You will take note of the timelines agreed in the accepted "Quote" Document to give durations to tasks and assign due date, starting from the current date you initialize the project. Ex: So if you gave logo design two weeks and you initialize the project from 1st of August then logo design task due date will be 14th of August.
-
-Step 8: You will create text based guidance to all tasks and add as a comment to the task to help anyone working on the task:
-Ex:
-Lets say one of the tasks is logo design, based on all context of the client (which can be stored in db) and all conversations and context of the project. You can add a well detailed guide (not less than 10 lines, rich detailed docs but as text and as a comment on the task) as comment on the task to help anyone working on it
-Example for logo design:
-“Use shades of grey for logo
-Use icon based logo, Client likes Apple style logo
-
-…. More details as a detailed guide to help anyone working on the task”
-
-The essence is to help anyone working on the task get started quickly and AI Agent takes care of research and creative thinking.
-
-Step 9: After step 7 and 8 complete send email to Admin and Manager (if anyone on that role) and PM of the project via email, letting them know project has been 100% initialized.
+Step 9: After step 7 complete send email to Admin and Manager (if anyone on that role) and PM of the project via email, letting them know project has been initialized and team members have been added to the Asana project.
 
 Note:
 
