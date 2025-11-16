@@ -6,7 +6,39 @@ Where the plan relies on provider behaviors or best-practice patterns, I cite au
 
 ---
 
-## 1) Guiding principles (from Anthropic & practical agent ops)
+## 1) File Structure & Key Files
+
+**New Files to Create:**
+
+- `src/integrations/levitateStudiosErp.js` - ERP API integration service
+- `src/workers/quoteGeneration.js` - Quote generation worker processor
+- `src/services/quoteService.js` - Quote business logic and operations
+- `src/services/quotePromptService.js` - LLM prompts for quote generation
+- `src/services/teamMemberSelectionService.js` - Team member selection algorithm
+- `scripts/seed-rate-card.js` - One-time rate card seeding script (delete after running)
+
+**Files to Modify:**
+
+- `src/constants/index.js` - Update DocumentType enums (remove BUDGET_TIMELINE, add QUOTE)
+- `src/workers/emailIntent.js` - Add quote acceptance handling
+- `src/workers/asanaProjectInit.js` - Implement project creation and team member addition
+- `src/services/documentSendingService.js` - Handle quote PDF sending and selection
+- `src/routes/actions.js` - Add quote selection and sending endpoints
+- `src/services/emailTemplateService.js` - Add quote email templates
+- `prisma/schema.prisma` - Add quote tracking fields to Document model
+- All files using `DocumentType.BUDGET_TIMELINE` - Replace with `DocumentType.QUOTE`
+- All files with hardcoded `"Budget/Timeline Phase"` - Replace with `"Quote Document Phase"`
+
+**Reference Files:**
+
+- `AI-Context/Third Party Docs/Levitate ERP Software API Documentation.md` - ERP API reference
+- `AI-Context/Third Party Docs/asana_auto_assign_task_based_on_workload.md` - Team selection reference
+- `rateCard.json` - Rate card structure for seeding
+- `AI-Context/About This Project.md` - Project requirements
+
+---
+
+## 2) Guiding principles (from Anthropic & practical agent ops)
 
 - **Keep the agent simple and tool-centric.** Explicit tools with clear contracts; avoid giant, monolithic prompts. Let the agent call narrow tools (doc render, email parse, Asana ops) and iterate in short loops. ([Anthropic][1])
 - **Make planning/evaluation explicit.** Use a _planning pass → execution → self-check_ loop for long tasks; log reasoning artifacts in your DB for auditability and failure triage. ([Anthropic][1])
@@ -14,7 +46,7 @@ Where the plan relies on provider behaviors or best-practice patterns, I cite au
 
 ---
 
-## 2) High-level system architecture
+## 3) High-level system architecture
 
 **Services (same repo, modular monolith)**
 
@@ -25,6 +57,7 @@ Where the plan relies on provider behaviors or best-practice patterns, I cite au
   - **Google** (Forms Apps Script endpoint, Docs/Drive for content & revisions).
   - **Brevo** (transactional send, inbound-parse webhook). ([developers.brevo.com][3])
   - **Asana** (projects/sections/tasks, stories/comments, webhooks). ([developers.asana.com][4])
+  - **Levitate ERP Software** (quotation creation, updates, submission, invoice generation via ERPNext API). (See `AI-Context/Third Party Docs/Levitate ERP Software API Documentation.md`)
 
 - **LLM Gateway**: Vercel AI SDK configured for suitable LLM models; wrapper exposes “tools” and schema-validated outputs. ([ai-sdk.dev][5])
 - **Workers**: BullMQ consumers for document generation, Asana sync, email intent classification, etc. (sandboxed processors for stability). ([docs.bullmq.io][6])
@@ -41,7 +74,7 @@ Where the plan relies on provider behaviors or best-practice patterns, I cite au
 
 ---
 
-## 3) Data model (PostgreSQL)
+## 4) Data model (PostgreSQL)
 
 Key tables (selected columns only; use auto incrementing PKs unless noted)
 For enums listed here don't add in db level, let it be in backend level and validated before inserting in db
@@ -51,7 +84,7 @@ For enums listed here don't add in db level, let it be in backend level and vali
 - **projects**: id, client_id, name, phase(enum: QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED), asana_project_gid (nullable until Step 7), created_at, updated_at
 - **project_phase_log**: id, project_id, from_phase, to_phase, reason, actor(enum: SYSTEM|USER|LLM), at
 - **questionnaire_responses**: id, project_id, form_id, response_id, responses(JSONB), respondent_email, submitted_at, processed_at, processing_status(enum: PENDING|PROCESSED|FAILED), error_message(TEXT), retry_count, created_at, updated_at
-- **documents**: id, project_id, type(enum: BRAND_ORIGIN|BUDGET_TIMELINE|BUDGET_TIMELINE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), last_sent_revision_id (FK to document_revisions), is_variant(bool), variant_index(int|null), created_at, updated_at
+- **documents**: id, project_id, type(enum: BRAND_ORIGIN|QUOTE|QUOTE_VARIANT), status(enum: DRAFT|PM_REVIEW|SENT_TO_CLIENT|CLIENT_FEEDBACK|ACCEPTED|REJECTED), drive_file_id, current_revision_id (FK to document_revisions), last_sent_revision_id (FK to document_revisions), erp_quote_id(String|nullable), erp_variant_ids(JSONB|nullable), selected_quote_id(String|nullable), invoice_id(String|nullable, stored in metadata JSON), created_at, updated_at
 - **document_revisions**: id, document_id, drive_revision_id(nullable), snapshot_text(TEXT, gzip/base64), snapshot_md(JSONB optional), created_by(enum: AGENT|PM|FINANCE|CLIENT), created_at
 - **email_threads**: id, project_id, client_id, reply_to_address, provider_thread_id (Brevo/Message-Id), created_at
 - **emails**: id, thread_id, direction(enum: INBOUND|OUTBOUND), from_addr, to_addr, subject, raw_headers(JSONB), text_body(TEXT), html_body(TEXT), attachments_meta(JSONB), brevo_event_id, received_at, intent(enum: NONE|DOC_FEEDBACK|ACCEPT|REJECT|OFFTOPIC|OTHER), intent_confidence(NUMERIC), llm_trace_id, processed(bool)
@@ -72,6 +105,7 @@ For enums listed here don't add in db level, let it be in backend level and vali
 The `global_configs` table stores system-wide configuration that needs to persist across restarts:
 
 - **Key**: `asana_pending_projects` - Stores the persistent "Pending Projects" board configuration
+- **Key**: `rate_card` - Stores the studio rate card JSON (see `rateCard.json` for structure). Seeded via one-time script `scripts/seed-rate-card.js` (delete after running).
 
 **Configuration Access Patterns**:
 
@@ -82,7 +116,7 @@ The `global_configs` table stores system-wide configuration that needs to persis
 
 ---
 
-## 4) Enumerated states & transitions
+## 5) Enumerated states & transitions
 
 **Project.phase**
 
@@ -92,7 +126,8 @@ The `global_configs` table stores system-wide configuration that needs to persis
 **Document.status**
 
 - DRAFT → PM_REVIEW → SENT_TO_CLIENT → CLIENT_FEEDBACK → ACCEPTED (or REJECTED back to DRAFT)
-- Only one **active “original”** per type; “variants” are immutable (created once for Budget/Timeline).
+- Only one **active "original"** per type; "variants" are immutable (created once for Quote documents - 3 variants generated alongside main quote).
+- For Quote documents: Finance Manager selects ONE quote (main or variant) to send to client; tracked via `selected_quote_id`. Only the selected quote is updated during feedback loops.
 
 ---
 
@@ -143,7 +178,7 @@ C) **UI native form** → API same as (A).
     "sections": {
       "Filled Questionnaire": "section_gid_1",
       "Brand Origin Doc Phase": "section_gid_2",
-      "Budget/Timeline Phase": "section_gid_3",
+      "Quote Document Phase": "section_gid_3",
       "Finalized": "section_gid_4",
       "Rejected": "section_gid_5"
     },
@@ -213,33 +248,230 @@ C) **UI native form** → API same as (A).
 
 - Every regeneration produces a new `document` / `document_revision` and fresh Drive head; keep DB snapshots authoritative.
 
-### Step 5 — Accept Brand Origin → Budget/Timeline creation
+### Step 5 — Accept Brand Origin → Quote Document creation
 
-- On email intent=ACCEPT **or** manual accept:
+**Implementation Files:**
 
-  - Send **confirmation email** to PM & Finance with a single “Confirm & Create Budget/Timeline” CTA (either can click). - Confirmation email only sent if detected intent=ACCEPT, if manual accept don't send email just proceed to next phase.
-  - Clicking CTA or manual accept enqueues `DOC_BUDGET_TIMELINE_GENERATE` with dedupe key; set project.phase=BRAND_ORIGIN→BUDGET_TIMELINE; move Asana task to **Budget/Timeline Phase**; comment tagging PM & Finance with review/send CTAs.
-  - Generate **3 one-time variants** alongside the main Budget/Timeline doc (flag `is_variant=true`, `variant_index=1..3`); do **not** regenerate variants on later edits (only the main document).
+- `src/workers/emailIntent.js` - Handle ACCEPT intent for Brand Origin
+- `src/workers/quoteGeneration.js` - Quote generation worker
+- `src/services/quoteService.js` - Quote business logic
+- `src/services/quotePromptService.js` - LLM prompts for quote generation
+- `src/integrations/levitateStudiosErp.js` - ERP API integration
 
-### Step 6 — Budget/Timeline feedback loop
+**Workflow:**
 
-- Same as Step 4 but for Budget/Timeline doc until status=ACCEPTED. Variants remain immutable, for reference only.
+- On email intent=ACCEPT **or** manual accept from Admin UI:
+  - **NO confirmation email** - directly enqueue `QUOTE_GENERATION` job with dedupe key `project:<id>:quote:generate`
+  - Update document status to ACCEPTED
+  - Set project.phase=BRAND_ORIGIN→BUDGET_TIMELINE (internal phase name)
+  - Move Asana task to **"Quote Document Phase"** section
 
-### Step 7 — Finalize & kick off Asana project
+**Quote Generation Process (`src/workers/quoteGeneration.js`):**
 
-- On accept (email intent or Admin UI):
+1. **Context Assembly:**
 
-  - Move the card in “Pending Projects” to **Finalized**; send **“Finalize & Initialize Project”** CTA to PM & Finance (deduped).
-  - Enqueue `ASANA_CREATE_PROJECT` to create the **real project** with sections _To Do_, _In Progress_, _In Review_, _Completed_. Create tasks derived from the accepted Budget/Timeline breakdown; map roles to assignees (lead if multiple). Due dates = rolling offsets from initialization date.
-  - Persist `asana_project_gid`, section gids, and created task gids.
+   - Query `questionnaire_responses` for project
+   - Get `client.context` and `project.context`
+   - Get accepted Brand Origin document (latest revision)
+   - Load rate card from `global_configs` (key: `rate_card`) - see `rateCard.json` for structure
+   - Include quote generation rules/examples (provided as context)
+
+2. **LLM Workflow (`src/services/quotePromptService.js`):**
+
+   - Analyze project requirements from questionnaire and brand origin
+   - Map services to rate card items (fuzzy matching; handle "TBD" prices gracefully)
+   - Generate quote items with quantities, rates, and descriptions
+   - Use structured output schema for quote items array
+
+3. **ERP Quote Creation (`src/integrations/levitateStudiosErp.js`):**
+
+   - Create **4 quotes** via ERP API (all in DRAFT, docstatus: 0):
+     - Main quote (original)
+     - Variant 1 (alternative pricing/scope)
+     - Variant 2 (alternative pricing/scope)
+     - Variant 3 (alternative pricing/scope)
+   - Store quote IDs:
+     - `erp_quote_id` = main quote ID
+     - `erp_variant_ids` = JSON array `[variant1_id, variant2_id, variant3_id]`
+     - `selected_quote_id` = null (set when Finance Manager selects one)
+
+4. **PDF Generation & Storage:**
+
+   - Download PDFs from ERP for all 4 quotes using `getQuotationPDF(quoteId)`
+   - Upload main quote PDF to Google Drive
+   - Create `Document` record:
+     - `type = DocumentType.QUOTE`
+     - `status = DocumentStatus.DRAFT`
+     - `erp_quote_id`, `erp_variant_ids` populated
+   - Create `DocumentRevision` with Drive file ID
+
+5. **Asana Updates:**
+
+   - Move task to "Quote Document Phase" section
+   - Add comment tagging Finance Manager (no quote link in comment)
+   - Comment: "Quote document created. Please check your email to review and send to client."
+
+6. **Email Notification (`src/services/emailTemplateService.js`):**
+
+   - Send to Finance Manager & Admin
+   - Include:
+     - **View button** - Opens Drive link to main quote PDF
+     - **Send to Client button** - Action to select and send quote
+     - **Manage button** - Opens Admin UI
+   - List all 4 quote variants with links/IDs for selection
+   - Finance Manager selects ONE quote (main or variant) to send
+
+7. **Quote Selection (`src/routes/actions.js`):**
+   - When Finance Manager clicks "Send to Client" from email or UI:
+     - Track which quote was selected (main or variant index)
+     - Update `Document.selected_quote_id` with chosen quote ID
+     - Use this selected quote for sending to client
+     - Store in `last_sent_revision_id` for future reference
+
+**Error Handling:**
+
+- If ERP API fails, retry with exponential backoff
+- If quote creation partially succeeds, store what was created and notify admin
+- Always verify quote status before operations (check if cancelled via `getQuotation()`)
+
+### Step 6 — Quote Document feedback loop
+
+**Implementation Files:**
+
+- `src/workers/emailIntent.js` - Intent detection for quote feedback
+- `src/workers/quoteGeneration.js` - Quote update logic
+- `src/integrations/levitateStudiosErp.js` - ERP API update methods
+
+**Workflow:**
+
+- Brevo webhook → enqueue `EMAIL_PARSE` → detect intent on Quote document
+- **Important**: Use `selected_quote_id` to know which quote client is referring to
+
+**Feedback Processing:**
+
+1. **Intent Detection:**
+
+   - Check document status (not ACCEPTED)
+   - Extract requested changes from email
+   - Use `last_sent_revision_id` to get exact content sent to client
+
+2. **Quote Update (`src/integrations/levitateStudiosErp.js`):**
+
+   - **Before update**: Call `getQuotation(selected_quote_id)` to verify not cancelled
+   - **If cancelled**: Use `amendQuotation()` to create new draft from cancelled quote
+   - **If draft**: Use `updateQuotation()` with new items
+   - **Critical**: Items array in update request **completely replaces** existing items - must fetch existing items first, modify, then send full array
+   - **Only update the selected quote** (main or variant), not all 4 quotes
+   - Keep `selected_quote_id` pointing to the updated quote
+
+3. **PDF & Revision:**
+
+   - Generate new PDF from updated quote based on pdf_url returned in api response of getQuotation()
+   - Upload to Google Drive
+   - Create new `DocumentRevision`
+   - Update `last_sent_revision_id`
+
+4. **Asana & Email:**
+   - Add comment in Asana task
+   - Email Finance Manager about quote update
+
+**Variants:**
+
+- Variants remain immutable - only the selected quote is updated
+- If client wants major changes, just update the quote (still in draft on ERP)
+
+### Step 7 — Quote Acceptance → Invoice Creation → Project Finalization
+
+**Implementation Files:**
+
+- `src/workers/emailIntent.js` - Handle ACCEPT intent for Quote
+- `src/integrations/levitateStudiosErp.js` - Quote submission and invoice creation
+- `src/workers/asanaProjectInit.js` - Asana project initialization
+- `src/services/teamMemberSelectionService.js` - Team member selection logic
+
+**Workflow:**
+
+**A. Quote Acceptance:**
+
+- On email intent=ACCEPT **or** manual accept from Admin UI:
+  - Update document status to ACCEPTED
+  - Submit quote via ERP: `submitQuotation(selected_quote_id)` (docstatus: 0 → 1)
+  - Create invoice: `createSalesInvoice(selected_quote_id, invoiceData)` - link invoice to quote
+  - Store invoice ID in `Document` metadata JSON: `{ invoiceId: "INV-xxx" }`
+  - If detected via email intent: send **confirmation email** to Admin & Finance Manager
+  - If manual accept: directly proceed to finalization
+
+**B. Finalization:**
+
+- Move Asana task to **"Finalized"** column in "Pending Projects" board
+- Project phase: `BUDGET_TIMELINE` → `FINALIZED`
+- Log phase transition in `project_phase_log`
+- Enqueue `ASANA_PROJECT_INIT` job with dedupe key `project:<id>:asana_init`
+
+**C. Asana Project Initialization (`src/workers/asanaProjectInit.js`):**
+
+1. **Project Creation:**
+
+   - Create Asana project with board layout
+   - Create sections: "To Do", "In Progress", "In Review", "Completed"
+   - Store `asana_project_gid` in `projects.asana_project_gid`
+   - Store section GIDs in `asana_links.sections` JSON
+
+2. **Team Member Selection (`src/services/teamMemberSelectionService.js`):**
+
+   - **Algorithm** (improved from `AI-Context/Third Party Docs/asana_auto_assign_task_based_on_workload.md`):
+     - Get all active team members from DB (`team_members` where `is_active=true`)
+     - For each team member:
+       - Get their roles and skills from `roles` JSONB field
+       - Query Asana API for **incomplete tasks count across ALL projects** (not just current)
+       - Use pagination if project has >1000 tasks
+       - Calculate workload score (inverse: less work = higher score)
+     - Analyze project requirements:
+       - Extract required skills/services from questionnaire, brand origin, quote
+       - Map to team roles (see `src/constants/index.js` TeamRole enum)
+     - Score each team member:
+       - Skill match score (0-1) - how well their roles match project needs
+       - Workload score (based on incomplete tasks only)
+       - Combined score = (skillMatch _ 0.7) + (workloadScore _ 0.3)
+     - Select top N team members per required role
+     - If multiple people for same role, prefer lead if available (`isLead: true`)
+     - Handle concurrent selections with distributed locks (Redis)
+   - **Improvements over original script:**
+     - Query workload across all projects (not just current project)
+     - Use pagination for projects with >1000 tasks
+     - Handle concurrent task additions with distributed locks
+     - Consider only incomplete tasks for workload calculation
+     - Cache workload data with TTL to reduce API calls
+
+3. **Add Team Members to Project:**
+
+   - Add selected team members to Asana project (not assign tasks yet)
+   - Use Asana API to add members to project
+   - Store team member GIDs in project metadata
+
+4. **Project Description:**
+
+   - Generate comprehensive project description (exclude financials):
+     - Client context (`client.context`)
+     - Project requirements (from questionnaire)
+     - Brand guidelines (from accepted brand origin)
+     - Conversations (from email threads)
+     - Any other relevant context
+   - Add description to Asana project
+
+5. **No Task Assignment:**
+   - **Do NOT** create or assign tasks at this stage
+   - Tasks will be created in Step 8 (future implementation)
 
 ### Step 8 — Task guidance comments
 
-- For each created task, generate a **15+ line guidance** comment (LLM) with concrete cues (palette, style, deliverables). Post as Asana **story**; @mention the assignee and PM for visibility. ([developers.asana.com][14])
+**Note:** Step 8 details to be shared later. This step will handle task creation and guidance comment generation.
 
 ### Step 9 — Completion notice
 
-- Email Admin, Manager (if any), and PM: “Project initialized 100%.” Include links (Asana project, Docs).
+- Email Admin, Manager (if any), and PM: "Project initialized and team members have been added to the Asana project."
+- Include links: Asana project, project documents
+- Notify that project is ready for task assignment
 
 **Always-on sync**
 
@@ -268,15 +500,21 @@ C) **UI native form** → API same as (A).
 **Providers & cost-aware model routing**
 
 - **Classification / intent detection / extract fields** → small model via `generateObject` (schema) - the SDK supports tool-calling + structured outputs. ([ai-sdk.dev][2])
-- **Document drafting** (Brand Origin, Budget/Timeline) → balanced quality/cost model; allow multi-step tool loops (web search, projec/client history reading from db, previous doc create favoring accepted ones or repo lookups etc. if needed, rules and example documents would be given in context) via AI SDK **tool calling**. ([ai-sdk.dev][16])
+- **Document drafting** (Brand Origin, Quote) → balanced quality/cost model; allow multi-step tool loops (web search, project/client history reading from db, previous doc create favoring accepted ones or repo lookups etc. if needed, rules and example documents would be given in context) via AI SDK **tool calling**. ([ai-sdk.dev][16])
+- **Quote generation** → Use rate card from `global_configs` to map project requirements to pricing; generate structured quote items with quantities and rates; create 4 variations (main + 3 variants) via ERP API.
 
 **Tools exposed to the agent, feel free to add if no one caters for your needs yet - but update the list here.**
 
 - `readProjectContext(projectId)` - Gets client.context + project.context + project metadata
 - `readQuestionnaireResponses(projectId)` - Gets all questionnaire responses for project with structured parsing
 - `readSnapshots(documentId)` - Gets document revision history
+- `readRateCard()` - Gets rate card from global_configs (key: rate_card)
 - `writeDoc(type, content)` - Creates/updates documents in Google Drive + DB
-- `createVariant(...)` - Creates document variants (Budget/Timeline only)
+- `createQuotation(items, customer, ...)` - Creates quote via ERP API (returns quote ID)
+- `updateQuotation(quoteId, items, ...)` - Updates draft quote via ERP API
+- `getQuotation(quoteId)` - Gets quote details and verifies not cancelled
+- `submitQuotation(quoteId)` - Submits quote (docstatus: 0 → 1)
+- `createInvoice(quoteId, ...)` - Creates invoice from quote
 - `postAsanaComment(taskGid, html_text)` (supports `@mentions` via `html_text` with user gid). ([developers.asana.com][14])
 - `sendEmail(templateId, to, params)` - Sends transactional emails via Brevo
 - `advanceState(projectId, transition)` - Manages project phase transitions (guarded)
@@ -293,7 +531,13 @@ C) **UI native form** → API same as (A).
 
 **Queues**
 
-- `doc-generation`, `email-intent`, `asana-sync`, `asana-project-init`, `notifications`, `snapshot-sync`
+- `doc-generation` - Document generation (Brand Origin, Quote)
+- `quote-generation` - Quote generation via ERP API
+- `email-intent` - Email intent classification and processing
+- `asana-sync` - Asana webhook event processing
+- `asana-project-init` - Asana project initialization and team member addition
+- `notifications` - Email notifications
+- `snapshot-sync` - Document snapshot synchronization
 
 **Job scheduler**
 
@@ -328,17 +572,89 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 12) Asana integration
+## 12) Levitate ERP Software integration
 
-- **Pending Projects** board bootstrap (if not found): create sections _Filled Questionnaire_, _Brand Origin Doc Phase_, _Budget/Timeline Phase_, _Finalized_, _Rejected_; persist gids. ([ai-sdk.dev][12])
+**Implementation File:** `src/integrations/levitateStudiosErp.js`
+
+**API Documentation:** See `AI-Context/Third Party Docs/Levitate ERP Software API Documentation.md`
+
+**Base Configuration:**
+
+- Base URL: `{{base_url}}` (from environment variables)
+- Authentication: Token-based `Authorization: token {api_key}:{api_secret}`
+- Headers: `Content-Type: application/json`
+
+**Key Methods:**
+
+- `createQuotation(data)` - Create draft quote (docstatus: 0)
+
+  - Endpoint: `POST /api/method/levitate_integration.api.create_quotation`
+  - Returns: `{ success: boolean, data: { name: "SAL-QTN-2025-00001", ... } }`
+  - **Critical**: Always check `success` field, not just HTTP status code
+
+- `getQuotation(quoteId)` - Get quote details (verify not cancelled)
+
+  - Endpoint: `GET /api/method/levitate_integration.api.get_quotation?name={quoteId}`
+  - Check for `quotation_canceled: true` in response
+  - Returns latest cancelled ID if cancelled: `latest_canceled_id`
+
+- `updateQuotation(quoteId, data)` - Update draft quote
+
+  - Endpoint: `POST /api/method/levitate_integration.api.update_quotation`
+  - **Critical**: Items array **completely replaces** existing items
+  - Must fetch existing items first, modify, then send full array
+  - Only works on draft quotes (docstatus: 0)
+
+- `submitQuotation(quoteId)` - Submit quote (docstatus: 0 → 1)
+
+  - Endpoint: `POST /api/method/levitate_integration.api.submit_quotation`
+  - Once submitted, cannot be edited
+
+- `cancelQuotation(quoteId)` - Cancel submitted quote
+
+  - Endpoint: `POST /api/method/levitate_integration.api.cancel_quotation?name={quoteId}`
+
+- `amendQuotation(quoteId, data)` - Create new draft from cancelled quote
+
+  - Endpoint: `POST /api/method/levitate_integration.api.amend_quotation`
+  - Creates new draft copy of cancelled quotation
+
+- `createSalesInvoice(quoteId, data)` - Create invoice from quote
+
+  - Endpoint: `POST /api/method/levitate_integration.api.create_sales_invoice`
+  - Link invoice to quote via `quotation` field
+
+- `getQuotationPDF(quoteId)` - Download PDF binary
+  - Endpoint: `GET /api/method/frappe.utils.print_format.download_pdf?doctype=Quotation&name={quoteId}&format=Standard`
+  - Returns: Binary PDF data (Content-Type: application/pdf)
+
+**Error Handling:**
+
+- Always check `success` field in JSON response (not just HTTP status)
+- Handle cancelled quotes: check `quotation_canceled` flag, use `latest_canceled_id` for amend
+- Items array replacement: fetch → modify → send full array
+- Document status: 0=Draft, 1=Submitted, 2=Cancelled
+- No rate limiting needed (per requirements)
+
+**Rate Card Integration:**
+
+- Rate card stored in `global_configs` (key: `rate_card`)
+- Structure: See `rateCard.json` for full schema
+- Seeded via one-time script: `scripts/seed-rate-card.js` (delete after running)
+- Used by LLM to map project requirements to pricing
+
+## 13) Asana integration
+
+- **Pending Projects** board bootstrap (if not found): create sections _Filled Questionnaire_, _Brand Origin Doc Phase_, _Quote Document Phase_, _Finalized_, _Rejected_; persist gids. ([ai-sdk.dev][12])
 - **Webhooks**: create on project; complete handshake by echoing `X-Hook-Secret`; verify HMAC signatures on future events. ([developers.asana.com][4])
 - **Moves & deletes**: track section changes and deletions; mirror deletes locally (edge case #13).
 - **Comments (@mentions)** via **Stories API** with `html_text` containing `<a data-asana-gid="...">` to mention users (supports PM/Finance tagging). ([developers.asana.com][14])
 - **Rate limits**: handle 429 with `Retry-After`, gradual concurrency; backoff in worker. ([developers.asana.com][8])
+- **Team member selection**: See Step 7 for workload-based selection algorithm
 
 ---
 
-## 13) Admin/Manager/PM UI (frontend)
+## 14) Admin/Manager/PM UI (frontend)
 
 - Admin can set functionalities that PM and manager can access from UI.
 
@@ -357,7 +673,7 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 14) Observability & audit
+## 15) Observability & audit
 
 - **Structured logs** with correlation ids: `project_id`, `job_id`, `llm_trace_id`, `provider_event_id`.
 - **Metrics**: job latency/success rate; Asana 429s; Brevo delivery/open; LLM token spend.
@@ -365,7 +681,7 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 15) Questionnaire & Data Flow Edge Cases
+## 16) Questionnaire & Data Flow Edge Cases
 
 **Questionnaire Submission Edge Cases:**
 
@@ -454,7 +770,7 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 16) Security, auth, and integrity
+## 17) Security, auth, and integrity
 
 - Secrets in Railway env vars; rotate regularly.
 - **Inbound webhooks**
@@ -467,15 +783,16 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 16) Error handling & retries (per integration)
+## 18) Error handling & retries (per integration)
 
 - **Asana**: if 429, sleep `Retry-After` seconds; if project/section not found, attempt re-bootstrap once; for 4xx validation errors, mark job unrecoverable (stop retries). ([developers.asana.com][8])
 - **Brevo**: if send error, queue retry with capped backoff; if inbound payload malformed, dead-letter and notify Admin.
 - **Drive**: quota errors → backoff; export failures → retry 3x; if Doc missing, recreate from last snapshot.
+- **Levitate ERP**: if quote cancelled, use `amendQuotation()` to create new draft; if update fails on submitted quote, cancel then amend; always check `success` field in response; retry with exponential backoff for network errors.
 
 ---
 
-## 17) Testing strategy
+## 19) Testing strategy
 
 - **Unit**: tools, schema validation, state transitions, signature verifiers.
 - **Contract tests**: stub Asana/Brevo/Drive with fixed payloads (webhook handshake, move event, inbound email).
@@ -484,7 +801,7 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 18) Rollout & operations
+## 20) Rollout & operations
 
 - **Phased rollout**: start with one PM + one Finance; simulate inbound emails; verify Asana sync; then enable client-facing addresses.
 - **Runbooks**:
@@ -495,7 +812,7 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 19) Cost controls
+## 21) Cost controls
 
 - Prefer **small models** for classification; reserve larger models only for longform docs; enforce token caps but don't limit quality of LLM response. ([ai-sdk.dev][2])
 - Batch Asana writes when possible; respect rate limits; collapse duplicate comments. ([developers.asana.com][8])
@@ -503,39 +820,76 @@ C) **UI native form** → API same as (A).
 
 ---
 
-## 20) Implementation backlog (by milestone)
+## 22) Implementation backlog (by milestone)
 
-**M0 – Foundations (1–1.5 weeks)**
+**M0 – Foundations & Constants Update (1 week)**
 
-- Repo scaffolding; DB migrations; queues/workers; health & auth; action link signing; basic Admin shell.
+- **CRITICAL FIRST STEP**: Update constants and enums (NO backward compatibility):
+  - Update `src/constants/index.js`: Remove `DocumentType.BUDGET_TIMELINE` and `DocumentType.BUDGET_TIMELINE_VARIANT`
+  - Add `DocumentType.QUOTE` and `DocumentType.QUOTE_VARIANT`
+  - Update `AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE` → `QUOTE_DOCUMENT_PHASE: "Quote Document Phase"`
+  - Search entire codebase for hardcoded strings: `"Budget/Timeline Phase"` → `"Quote Document Phase"`
+  - Search for `DocumentType.BUDGET_TIMELINE` → replace with `DocumentType.QUOTE`
+  - Search for `DocumentType.BUDGET_TIMELINE_VARIANT` → replace with `DocumentType.QUOTE_VARIANT`
+- Database migrations: Add quote fields to `documents` table (erp_quote_id, erp_variant_ids, selected_quote_id)
+- Rate card seeding: Create and run `scripts/seed-rate-card.js` (delete after running)
+- Repo scaffolding; queues/workers; health & auth; action link signing; basic Admin shell.
 
 **M1 – Intake & Pending Board (1 week)**
 
 - Apps Script endpoint + Brevo send; Asana pending board bootstrap & webhook; Step 1 + PM notify. ([Google for Developers][10], [docs.bullmq.io][11], [ai-sdk.dev][12], [developers.asana.com][4])
+- Ensure "Quote Document Phase" section is created in Pending Projects board.
 
 **M2 – Brand Origin loop (1.5–2 weeks)**
 
 - Doc generator + snapshots; review/send; inbound parse + intent; regeneration loop; Asana comments. ([developers.brevo.com][3])
 
-**M3 – Budget/Timeline + variants (1.5 weeks)**
+**M3 – ERP Integration & Quote Generation (2 weeks)**
 
-- Confirm flow; main + 3 variants; loop until accepted.
+- Create `src/integrations/levitateStudiosErp.js` with all ERP API methods
+- Create `src/workers/quoteGeneration.js` - Quote generation worker
+- Create `src/services/quoteService.js` - Quote business logic
+- Create `src/services/quotePromptService.js` - LLM prompts for quote generation
+- Update `src/workers/emailIntent.js` - Handle Brand Origin acceptance (no confirmation email, direct quote generation)
+- Quote generation: main + 3 variants via ERP API
+- PDF generation and Drive upload
+- Quote selection tracking (selected_quote_id)
+- Email templates for quote notifications
+- Feedback loop: quote updates via ERP API
 
-**M4 – Project initialization (1.5 weeks)**
+**M4 – Quote Acceptance & Invoice (1 week)**
 
-- Create Asana real project, sections & tasks; guidance comments; completion email.
+- Quote submission (docstatus: 0 → 1)
+- Invoice creation from quote
+- Invoice ID storage in document metadata
+- Finalization workflow
 
-**M5 – Observability & polish (1 week)**
+**M5 – Asana Project Initialization (1.5 weeks)**
+
+- Create `src/services/teamMemberSelectionService.js` - Team member selection logic
+- Update `src/workers/asanaProjectInit.js` - Implement project creation and team member addition
+- Workload-based team selection (incomplete tasks only, across all projects)
+- Project description generation (exclude financials)
+- Add team members to project (no task assignment yet)
+- Completion email notifications
+
+**M6 – Observability & polish (1 week)**
 
 - Logs/metrics, admin ops (replay, re-bootstrap), error dashboards.
+- ERP integration error handling and monitoring
 
 ---
 
 ### Notes & constraints surfaced during design
 
-- **Drive non-purgeable revisions for Google Docs aren’t supported via `keepForever`** (binary only). We meet the “non-purgeable” requirement by **DB snapshots** + optional duplicated Docs at milestones. ([Google for Developers][15])
+- **Drive non-purgeable revisions for Google Docs aren't supported via `keepForever`** (binary only). We meet the "non-purgeable" requirement by **DB snapshots** + optional duplicated Docs at milestones. ([Google for Developers][15])
 - **Asana @mentions** via `html_text` with `data-asana-gid` let us tag PM/Finance reliably from API comments. ([developers.asana.com][14])
 - **Webhooks security** must honor provider-specific guidance (Asana secrets/signatures; Brevo auth/allowlists). ([developers.asana.com][9], [developers.brevo.com][19])
+- **Constants Update (CRITICAL)**: All `DocumentType.BUDGET_TIMELINE` references must be replaced with `DocumentType.QUOTE` throughout the codebase. No backward compatibility. Search for hardcoded strings `"Budget/Timeline Phase"` and replace with `"Quote Document Phase"`. See M0 in Implementation backlog.
+- **ERP API Critical Notes**: Always check `success` field in JSON response (not just HTTP status). Items array in update requests completely replaces existing items - must fetch existing items first, modify, then send full array. Verify quote not cancelled before operations using `getQuotation()`.
+- **Quote Selection**: Finance Manager selects ONE quote (main or variant) to send to client. Track via `selected_quote_id`. Only the selected quote is updated during feedback loops. Variants remain immutable.
+- **Team Member Selection**: Query workload across ALL projects (not just current), use only incomplete tasks for workload calculation, implement pagination for projects with >1000 tasks. See Step 7 for full algorithm.
+- **Rate Card**: Stored in `global_configs` (key: `rate_card`). Seeded via one-time script `scripts/seed-rate-card.js` (delete after running). Used by LLM to map project requirements to pricing with fuzzy matching.
 - Check here on how to structure system prompts: (https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools)[https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools]
 
 [1]: https://www.anthropic.com/research/building-effective-agents "Building Effective AI Agents"
