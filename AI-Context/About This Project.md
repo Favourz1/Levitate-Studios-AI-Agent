@@ -9,7 +9,7 @@ Step 1: Client fills questionnaire
 - In our db we store the 'Pending Projects' project id but we also have code to check if it exists in db else create and save in db to ensure other actions in code doesn't break. The 'Pending Projects' project with a board that has this columns
   Filled Questionaire,
   Brand Origin Doc Phase,
-  Budget/Timeline Phase,
+  Quote Document Phase,
   Finalized,
   Rejected
 
@@ -31,7 +31,7 @@ Step 4: In the inbound email listener, when a new email is received, we detect c
 
 - So we need to track status of document and changes, we also need to track status/current phase of client project.
 
-Step 5: If you detect that Brand origin document is accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to Finance Manager and Admin to confirm with a button in email (any of them can click must not be both) and when clicked starts cron job for creating the Quote document via ERP software API (if cron job already in process don't rerun incase both click button same time) and when document complete move project to "Budget/Timeline Phase" column in 'Pending Projects' board (You only send confirmation email to Finance Manager and Admin if not clicked from Admin UI i.e accepted status wasn't API triggered but detected intent from email)
+Step 5: If you detect that Brand origin document is accepted by client based on the email intent or manually if clicked from Admin UI to accepted - Send confirmation email to Finance Manager and Admin to confirm with a button in email (any of them can click must not be both) and when clicked starts cron job for creating the Quote document via ERP software API (if cron job already in process don't rerun incase both click button same time) and when document complete move project to "Quote Document Phase" column in 'Pending Projects' board (You only send confirmation email to Finance Manager and Admin if not clicked from Admin UI i.e accepted status wasn't API triggered but detected intent from email)
 
 - We store the Quote ID returned from the ERP software API in our db.
 - Also add new comment on task and tag Finance Manager that "Quote" document created telling person to go to email to review or send to client but don't attach the link to quote document in the asana task comment.
