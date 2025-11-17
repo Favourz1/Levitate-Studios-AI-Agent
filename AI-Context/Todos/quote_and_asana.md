@@ -4,33 +4,149 @@
 
 Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 
-1. ✅ **Brand Origin Document Generation** (`src/workers/documentGeneration.js`)
+### Step 1: Questionnaire Intake & Processing ✅
 
-   - Context assembly from questionnaire, client, project
-   - LLM workflow (plan → compose → self-check)
+1. ✅ **Questionnaire Form Submission Handling** (`src/services/formSubmissionService.js`, `src/routes/webhooks.js`, `src/routes/forms.js`)
+
+   - Google Forms Apps Script webhook endpoint (`POST /webhooks/apps-script/forms`)
+   - Direct API form submission endpoint (`POST /forms/submit`)
+   - Uploaded document parsing support (frontend prefill)
+   - Form payload validation (`validateFormPayload`)
+   - Apps Script signature verification (`validateAppsScriptSignature`)
+   - Client information extraction from questionnaire responses
+   - Project information extraction
+   - Email extraction (respondent email or from responses field)
+
+2. ✅ **Database Processing** (`src/services/formSubmissionService.js`)
+
+   - Client creation/update (match by email, update context if existing)
+   - Project creation with phase=QUESTIONNAIRE
+   - Questionnaire response storage with deduplication (UNIQUE constraint on form_id + response_id)
+   - Email thread creation with unique reply-to address (`clients-<CLIENT_ID>-<PROJECT_ID>@levitate.ng`)
+   - Project phase logging (QUESTIONNAIRE phase transition)
+   - Audit log creation
+   - Processing status tracking (PENDING, PROCESSED, FAILED)
+   - Retry logic with error handling (up to 3 retries)
+   - Error message storage for failed processing
+
+3. ✅ **Asana Pending Projects Board** (`src/services/asanaPendingProjectsService.js`, `src/integrations/asana.js`)
+
+   - Persistent "Pending Projects" board stored in `global_configs` (key: `asana_pending_projects`)
+   - Database-first approach with verification
+   - Board bootstrap with sections: "Filled Questionnaire", "Brand Origin Doc Phase", "Quote Document Phase", "Finalized", "Rejected"
+   - Task creation in "Filled Questionnaire" section
+   - PM assignment to task (lead PM or any active PM)
+   - Edge case handling (board deletion, section recreation, incremental repair)
+   - Webhook creation API methods (`createWebhook`, `deleteWebhook`)
+   - Section GID storage in database
+   - **Note**: Asana webhook event processing (`src/workers/asanaSync.js`) is currently a placeholder - webhook route exists but handler needs implementation
+
+4. ✅ **PM Notification** (`src/services/formSubmissionService.js`, `src/services/emailTemplateService.js`)
+
+   - Email notification to PM when questionnaire received
+   - Email template with project details (`generateQuestionnaireSubmissionNotificationTemplate`)
+   - Admin email included in production environment
+   - Brevo transactional email integration
+
+5. ✅ **Brand Origin Generation Trigger** (`src/services/formSubmissionService.js`, `src/queues/index.js`)
+   - Automatic enqueue of brand origin generation job after questionnaire processing
+   - Dedupe key: `project:<id>:brand_origin:generate`
+   - Queue: `doc-generation` with priority
+
+### Step 2: Brand Origin Document Generation ✅
+
+6. ✅ **Brand Origin Document Generation** (`src/workers/documentGeneration.js`, `src/services/brandOriginPromptService.js`)
+
+   - Context assembly from questionnaire responses, client context, project context
+   - LLM workflow (plan → compose → self-check loop)
    - Google Drive document creation
-   - Database record creation
+   - Database record creation (Document + DocumentRevision)
+   - Document snapshot storage (text in DB for AI access)
    - Asana task movement to "Brand Origin Doc Phase"
+   - Asana comment with PM tagged and document links
    - PM notification email with Review/Send buttons
+   - Action token generation for email buttons (JWT-based)
 
-2. ✅ **Brand Origin Document Regeneration** (`src/workers/emailIntent.js`)
-
+7. ✅ **Brand Origin Document Regeneration** (`src/workers/emailIntent.js`, `src/services/brandOriginPromptService.js`)
    - Feedback detection from client emails
    - Document regeneration with feedback context
    - Update existing document records
+   - New revision creation with feedback summary
    - Asana comments and notifications
+   - Feedback integration in LLM prompts (`generateBrandOriginRegenerationPrompt`)
 
-3. ✅ **Document Sending to Client** (`src/services/documentSendingService.js`)
+### Step 3: Document Sending to Client ✅
 
+8. ✅ **Document Sending to Client** (`src/services/documentSendingService.js`, `src/routes/actions.js`)
    - PDF conversion from Google Docs
-   - Email sending via Brevo
-   - Database status updates
+   - Google Drive PDF upload
+   - Email sending via Brevo with PDF attachment
+   - Database status updates (SENT_TO_CLIENT)
    - Email thread management
+   - Last sent revision tracking (`last_sent_revision_id`)
+   - Action token authentication (`GET /actions/send-to-client?t=<JWT>`)
+   - Idempotency handling (nonce-based)
+   - Document validation before sending
 
-4. ✅ **Email Intent Detection** (`src/workers/emailIntent.js`)
-   - Intent classification (ACCEPT, DOC_FEEDBACK, REJECT, etc.)
+### Step 4: Email Intent Detection & Feedback Loop ✅
+
+9. ✅ **Email Intent Detection** (`src/workers/emailIntent.js`, `src/services/intentPromptService.js`)
+
+   - Brevo inbound webhook processing (`POST /webhooks/brevo/inbound`)
+   - Email parsing and storage
+   - Client identification from reply-to address
+   - Intent classification (ACCEPT, DOC_FEEDBACK, REJECT, OFFTOPIC, OTHER)
    - Document type analysis
    - Client feedback extraction
+   - Confidence scoring
+   - Enhanced context assembly using `lastSentRevisionId`
+   - Accurate content tracking for feedback analysis
+   - Structured JSON output via LLM
+
+10. ✅ **Email Inbound Service** (`src/services/emailInboundService.js`)
+    - Reply-to address parsing (`clients-<CLIENT_ID>-<PROJECT_ID>@levitate.ng`)
+    - Email thread matching and creation
+    - Email record creation in database
+    - Attachment metadata storage
+    - Audit logging
+    - Email enqueue for intent processing
+
+### Additional Infrastructure ✅
+
+11. ✅ **Queue System** (`src/queues/index.js`)
+
+    - BullMQ queue setup
+    - Document generation queue (`doc-generation`)
+    - Email intent queue (`email-intent`)
+    - Job deduplication
+    - Priority handling
+
+12. ✅ **Email Templates** (`src/services/emailTemplateService.js`)
+
+    - PM notification templates
+    - Brand origin notification templates
+    - Document review templates
+    - Client document email templates
+    - Regeneration notification templates
+
+13. ✅ **Validation & Error Handling** (`src/utils/validation/`)
+
+    - Form validation (`formValidation.js`)
+    - Webhook validation (`webhookValidation.js`)
+    - Apps Script signature validation
+    - Error handling middleware
+    - Common validation utilities
+
+14. ✅ **Database Schema** (`prisma/schema.prisma`)
+    - All required tables for Steps 1-4
+    - Questionnaire response tracking with deduplication
+    - Document revision tracking
+    - Email thread management
+    - Project phase logging
+    - Audit logging
+    - Global configs for system-wide settings
+
+**Note**: According to `About This Project.md` Step 2, "If questionnaire is from google form, we send an email to client that we have received it." This appears to be **NOT YET IMPLEMENTED** - client acknowledgment email should be added if required.
 
 ---
 
