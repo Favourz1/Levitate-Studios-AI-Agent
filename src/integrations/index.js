@@ -5,6 +5,11 @@ const {
 } = require("@/integrations/asana");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { googleIntegration } = require("@/integrations/google");
+const {
+  LevitateStudiosErpIntegration,
+  erpIntegration,
+  getErpIntegration,
+} = require("@/integrations/levitateStudiosErp");
 
 module.exports = {
   AsanaIntegration,
@@ -12,4 +17,7 @@ module.exports = {
   getAsanaIntegration,
   brevoIntegration,
   googleIntegration,
+  LevitateStudiosErpIntegration,
+  erpIntegration,
+  getErpIntegration,
 };
