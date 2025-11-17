@@ -8,14 +8,12 @@
 const { getPrismaClient } = require("../src/database");
 const fs = require("fs");
 const path = require("path");
-const { createLogger } = require("../src/utils/logger");
 
-const logger = createLogger("script:seed-rate-card");
 const prisma = getPrismaClient();
 
 async function seedRateCard() {
   try {
-    logger.info("Starting rate card seeding process");
+    console.log("[INFO] Starting rate card seeding process");
 
     // Read rate card JSON file
     const rateCardPath = path.join(__dirname, "..", "rateCard.json");
@@ -37,8 +35,8 @@ async function seedRateCard() {
     });
 
     if (existingConfig) {
-      logger.warn(
-        "Rate card already exists in database. Updating with new data..."
+      console.warn(
+        "[WARN] Rate card already exists in database. Updating with new data..."
       );
 
       await prisma.globalConfig.update({
@@ -50,7 +48,7 @@ async function seedRateCard() {
         },
       });
 
-      logger.info("Rate card updated successfully");
+      console.log("[INFO] Rate card updated successfully");
     } else {
       // Create new rate card config
       await prisma.globalConfig.create({
@@ -63,7 +61,7 @@ async function seedRateCard() {
         },
       });
 
-      logger.info("Rate card created successfully");
+      console.log("[INFO] Rate card created successfully");
     }
 
     // Verify the data was stored correctly
@@ -75,13 +73,10 @@ async function seedRateCard() {
       throw new Error("Failed to verify rate card was stored");
     }
 
-    logger.info(
-      {
-        sectionsCount: verifyConfig.value.sections?.length || 0,
-        hasMetadata: !!verifyConfig.value.metadata,
-      },
-      "Rate card seeded and verified successfully"
-    );
+    console.log("[INFO] Rate card seeded and verified successfully:", {
+      sectionsCount: verifyConfig.value.sections?.length || 0,
+      hasMetadata: !!verifyConfig.value.metadata,
+    });
 
     console.log("✅ Rate card seeded successfully!");
     console.log(`   Sections: ${verifyConfig.value.sections?.length || 0}`);
@@ -90,13 +85,10 @@ async function seedRateCard() {
 
     return true;
   } catch (error) {
-    logger.error(
-      {
-        error: error.message,
-        stack: error.stack,
-      },
-      "Failed to seed rate card"
-    );
+    console.error("[ERROR] Failed to seed rate card", {
+      error: error.message,
+      stack: error.stack,
+    });
 
     console.error("❌ Failed to seed rate card:");
     console.error(`   ${error.message}`);
