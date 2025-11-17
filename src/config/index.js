@@ -37,6 +37,11 @@ const envSchema = Joi.object({
   ASANA_ACCESS_TOKEN: Joi.string().required(),
   ASANA_WORKSPACE_GID: Joi.string().required(),
 
+  // Levitate ERP Software
+  LEVITATE_ERP_BASE_URL: Joi.string().uri().required(),
+  LEVITATE_ERP_API_KEY: Joi.string().required(),
+  LEVITATE_ERP_API_SECRET: Joi.string().required(),
+
   // LLM
   OPENAI_API_KEY: Joi.string().required(),
   ANTHROPIC_API_KEY: Joi.string().optional(),
@@ -100,6 +105,13 @@ const appConfig = {
   asana: {
     accessToken: envVars.ASANA_ACCESS_TOKEN,
     workspaceGid: envVars.ASANA_WORKSPACE_GID,
+  },
+  erp: {
+    baseUrl: envVars.LEVITATE_ERP_BASE_URL.endsWith("/")
+      ? envVars.LEVITATE_ERP_BASE_URL.slice(0, -1)
+      : envVars.LEVITATE_ERP_BASE_URL,
+    apiKey: envVars.LEVITATE_ERP_API_KEY,
+    apiSecret: envVars.LEVITATE_ERP_API_SECRET,
   },
   llm: {
     openaiApiKey: envVars.OPENAI_API_KEY,
