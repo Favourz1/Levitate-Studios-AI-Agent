@@ -103,6 +103,51 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 
 - [ ] Create new file with class `LevitateStudiosErpIntegration`
 - [ ] Add constructor with base URL, API key, API secret from env vars
+
+**Customer Management Methods (CRITICAL - Must be implemented first):**
+
+- [ ] Implement `searchCustomers(searchTerm, limit)`:
+  - Endpoint: `GET /api/method/levitate_integration.api.search_customers?search_term={term}&limit={limit}`
+  - Returns: `{ success: boolean, data: [{ name, customer_name, email_id, ... }], count: number }`
+  - Handle response parsing
+  - Return array of customer objects
+- [ ] Implement `getCustomer(customerName)`:
+  - Endpoint: `GET /api/method/levitate_integration.api.get_customer?name={customerName}`
+  - Returns customer details if exists
+- [ ] Implement `createCustomer(customerData)`:
+  - Endpoint: `POST /api/method/levitate_integration.api.create_customer`
+  - Body: `{ customer_name: string, email?: string }`
+  - Returns: `{ success: boolean, data: { name: "customer_name", ... } }`
+  - Validate `success` field
+- [ ] Implement `searchOrCreateCustomer(customerName, email)`:
+  - Search for customer by exact name match
+  - If exact match found: return existing customer `name` field
+  - If no exact match: create new customer and return `name` field
+  - **Critical**: `name` field is the primary key (unique identifier)
+
+**Item Management Methods (CRITICAL - Must be implemented for each item):**
+
+- [ ] Implement `searchItems(searchTerm, limit)`:
+  - Endpoint: `GET /api/method/levitate_integration.api.search_items?search_term={term}&limit={limit}`
+  - Returns: `{ success: boolean, data: [{ name, item_code, item_name, description, standard_rate, ... }], count: number }`
+  - Handle response parsing
+  - Return array of item objects
+- [ ] Implement `getItem(itemCode)`:
+  - Endpoint: `GET /api/method/levitate_integration.api.get_item?item_code={itemCode}`
+  - Returns item details if exists
+- [ ] Implement `createItem(itemData)`:
+  - Endpoint: `POST /api/method/levitate_integration.api.create_item`
+  - Body: `{ data: { item_code: string, description: string, stock_uom: string } }`
+  - Returns: `{ success: boolean, data: { name: "item_code", ... } }`
+  - Validate `success` field
+- [ ] Implement `searchOrCreateItem(itemCode, description, stockUom = "Nos")`:
+  - Search for item by exact `item_code` or `item_name` match
+  - If exact match found: return existing item `item_code`
+  - If no exact match: create new item and return `item_code`
+  - Default `stock_uom` to "Nos" if not provided
+
+**Quotation Management Methods:**
+
 - [ ] Implement `createQuotation(data)`:
   - Endpoint: `POST /api/method/levitate_integration.api.create_quotation`
   - Validate `success` field in response
@@ -124,19 +169,24 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 - [ ] Implement `amendQuotation(quoteId, data)`:
   - Endpoint: `POST /api/method/levitate_integration.api.amend_quotation`
   - Creates new draft from cancelled quote
+  - **Critical**: Response returns new quote ID in `data.name` (not the cancelled ID)
+  - Response format: `{ success: boolean, message: string, data: { name: "SAL-QTN-2025-00201", amended_from: "SAL-QTN-2025-00201-CANC-0", pdf_url: "...", items: [...], ... } }`
+  - Return new quote ID from `data.name` for subsequent operations
 - [ ] Implement `createSalesInvoice(quoteId, data)`:
   - Endpoint: `POST /api/method/levitate_integration.api.create_sales_invoice`
   - Link invoice to quote via `quotation` field
   - Return invoice ID
 - [ ] Implement `getQuotationPDF(quoteId)`:
-  - Endpoint: `GET /api/method/frappe.utils.print_format.download_pdf?doctype=Quotation&name={quoteId}&format=test`
-  - Handle binary PDF response
+  - Endpoint: `GET /api/method/frappe.utils.print_format.download_pdf?doctype=Quotation&name={quoteId}&format=Standard`
+  - Handle binary PDF response (Content-Type: application/pdf)
   - Return PDF buffer
 - [ ] Add comprehensive error handling:
-  - Check `success` field in all responses
-  - Handle cancelled quotes
+  - Check `success` field in all responses (not just HTTP status)
+  - Handle cancelled quotes: check `quotation_canceled` flag
+  - **Cancellation API Quirk**: Sometimes cancellation shows `success: false` but actually worked - always verify with `getQuotation()` to confirm
   - Handle network errors with retry logic
   - Log all API calls
+  - **Amend Quote**: Always use new quote ID from `data.name` in response, not the cancelled ID
 - [ ] Add request/response logging
 - [ ] Export integration instance
 
@@ -200,12 +250,24 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - Use QuotePromptService to generate items
   - Call LLM with structured schema
   - Validate output
-  - Return quote items array
-- [ ] Implement `createQuotesViaERP(quoteItems, customer, project)`:
-  - Create main quote via ERP API
-  - Create 3 variant quotes with different strategies
+  - Return quote items array (with item_code, qty, rate, description)
+- [ ] Implement `ensureCustomerExists(client)`:
+  - Search for customer by exact name using `searchCustomers(client.name)`
+  - If exact match found: return existing customer `name` field
+  - If no exact match: create new customer using `createCustomer({ customer_name: client.name, email: client.primaryEmail })`
+  - Return customer name/ID for quote creation
+- [ ] Implement `ensureItemsExist(quoteItems, erpIntegration)`:
+  - For each quote item:
+    - Search for item by exact `item_code` or `item_name` using `searchItems(itemCode)`
+    - If exact match found: use existing item `item_code`
+    - If no exact match: create new item using `createItem({ data: { item_code, description, stock_uom: "Nos" } })`
+  - Return array of validated item codes (all items guaranteed to exist)
+- [ ] Implement `createQuotesViaERP(quoteItems, customerName, project, erpIntegration)`:
+  - **Prerequisites**: Customer must exist (call `ensureCustomerExists` first), All items must exist (call `ensureItemsExist` first)
+  - Create main quote via ERP API with customer name and validated item codes
+  - Create 3 variant quotes with different strategies (same customer, different items/pricing)
   - All in DRAFT (docstatus: 0)
-  - Return array of quote IDs
+  - Return array of quote IDs: `[mainQuoteId, variant1Id, variant2Id, variant3Id]`
 - [ ] Implement `downloadQuotePDFs(quoteIds)`:
   - Download PDFs for all 4 quotes
   - Return array of PDF buffers with metadata
@@ -226,7 +288,14 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - Extract job data (projectId, dedupeKey, correlationId)
   - Assemble context using QuoteService
   - Generate quote items using LLM
-  - Create 4 quotes via ERP API
+  - **Customer Setup (CRITICAL - Must be done first):**
+    - Call `QuoteService.ensureCustomerExists(client)` to search/create customer
+    - Store customer name/ID for quote creation
+  - **Item Setup (CRITICAL - Must be done for each item):**
+    - Call `QuoteService.ensureItemsExist(quoteItems, erpIntegration)` for main quote items
+    - For each variant, ensure variant-specific items exist
+    - All items must exist before quote creation
+  - Create 4 quotes via ERP API (using customer name and validated item codes)
   - Download PDFs
   - Upload to Google Drive
   - Create Document record with quote IDs
@@ -319,15 +388,27 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - Extract feedback context
   - Get selected quote ID from document
   - Verify quote not cancelled (call `getQuotation()`)
-  - If cancelled: use `amendQuotation()` to create new draft
-  - If draft: fetch existing items, modify based on feedback, update quote
-  - Generate new PDF
+  - **Item Setup for New Items (CRITICAL):**
+    - Identify any new items in feedback
+    - For each new item: call `QuoteService.ensureItemsExist([newItem], erpIntegration)`
+    - Ensure all new items exist before quote update
+  - **Quote Update:**
+    - If cancelled:
+      - Use `amendQuotation(cancelledQuoteId, data)` to create new draft
+      - **Critical**: Response returns new quote ID in `data.name` - update `selected_quote_id` with this new ID
+      - Use new quote ID for subsequent operations
+    - If draft:
+      - Fetch existing items from quote
+      - Modify items array based on feedback (replace, add, remove items)
+      - Use `updateQuotation()` with complete items array (all items must exist - ensured in step above)
+  - Generate new PDF using updated quote ID
   - Upload to Drive
   - Create new DocumentRevision
   - Update `last_sent_revision_id`
-  - Keep `selected_quote_id` pointing to updated quote
+  - Keep `selected_quote_id` pointing to updated quote (or new quote ID if amended)
 - [ ] Add error handling for cancelled quotes
 - [ ] Add logging for quote updates
+- [ ] Handle cancellation API quirk (verify with GET even if response shows success: false)
 
 ### 6.2 Update Email Intent Handler for Quote Feedback (`src/workers/emailIntent.js`)
 
@@ -558,13 +639,26 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 1. **Constants Update MUST be done first** - No backward compatibility
 2. **Database migration MUST be done before quote generation**
 3. **Rate card seeding MUST be done before quote generation**
-4. **Always verify quote not cancelled before operations**
-5. **Items array in update requests completely replaces existing - fetch first, modify, send full**
-6. **Finance Manager selects ONE quote to send - track via selected_quote_id**
-7. **Only update selected quote during feedback, not all variants**
-8. **Team member selection uses incomplete tasks only, across ALL projects**
-9. **No task assignment during project initialization - only add team members**
-10. **Add JSDoc comments to all new functions**
+4. **Customer Search/Creation (CRITICAL)**:
+   - MUST search for customer by exact name before creating quote
+   - Use `searchCustomers()` to find existing customer
+   - If exact match found: use existing customer `name` field (primary key)
+   - If no exact match: create new customer, then use `name` field
+   - Customer `name` field is the unique identifier used in quote creation
+5. **Item Search/Creation (CRITICAL)**:
+   - MUST search for each item by exact `item_code` or `item_name` before using in quote
+   - For each quote item: search first, use existing if found, otherwise create
+   - All items must exist before quote creation or update
+   - Default `stock_uom` to "Nos" when creating new items
+6. **Always verify quote not cancelled before operations** - Use `getQuotation()` to verify
+7. **Cancellation API Quirk**: Sometimes cancellation shows `success: false` but actually worked - always verify with GET
+8. **Amend Quote Response**: Returns new quote ID in `data.name` - always use this new ID, not the cancelled ID
+9. **Items array in update requests completely replaces existing - fetch first, modify, send full**
+10. **Finance Manager selects ONE quote to send - track via selected_quote_id**
+11. **Only update selected quote during feedback, not all variants**
+12. **Team member selection uses incomplete tasks only, across ALL projects**
+13. **No task assignment during project initialization - only add team members**
+14. **Always check `success` field in ERP API responses, not just HTTP status code**
 
 ---
 
