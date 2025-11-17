@@ -499,3 +499,7 @@ The `download_pdf` endpoint does not return a JSON object. It returns the raw PD
 ### 7\. Limit Parameters Not Supported
 
 **Important:** Do **not** use any `limit` (or similar pagination) parameters in your API calls. The Levitate ERP Software API does not support `limit` or pagination parameters on endpoints documented here. Including unsupported parameters may result in errors or unexpected behavior.
+
+### 8\. Cancellation API Quirk
+
+Sometimes, when you cancel a quotation, the API response may show `"success": false`; however, in most cases, the cancellation has actually worked silently. Always call `GET quotation` to validate whether the quotation is indeed canceled or not.
