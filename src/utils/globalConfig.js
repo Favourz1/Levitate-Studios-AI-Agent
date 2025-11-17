@@ -18,6 +18,7 @@ const CONFIG_KEYS = {
   BREVO_SETTINGS: "brevo_settings", // not in use now
   DOCUMENT_TEMPLATES: "document_templates",
   GOOGLE_DOCUMENTS_FOLDER: "google_documents_folder",
+  RATE_CARD: "rate_card",
 };
 
 /**
@@ -100,6 +101,87 @@ const validateConfigValue = (key, value) => {
         throw new ValidationError(
           "lastVerified must be a Date object or ISO string if provided"
         );
+      }
+      break;
+
+    case CONFIG_KEYS.RATE_CARD:
+      // Validate rate card structure (see rateCard.json)
+      if (!Array.isArray(value.sections) || value.sections.length === 0) {
+        throw new ValidationError(
+          "sections is required and must be a non-empty array"
+        );
+      }
+      value.sections.forEach((section, i) => {
+        if (!section || typeof section !== "object") {
+          throw new ValidationError(
+            `Each section must be an object (at index ${i})`
+          );
+        }
+        if (
+          !section.category ||
+          typeof section.category !== "string" ||
+          section.category.trim().length === 0
+        ) {
+          throw new ValidationError(
+            `section.category is required and must be a non-empty string (at index ${i})`
+          );
+        }
+        if (!Array.isArray(section.items) || section.items.length === 0) {
+          throw new ValidationError(
+            `section.items is required and must be a non-empty array (at index ${i})`
+          );
+        }
+        section.items.forEach((item, j) => {
+          if (!item || typeof item !== "object") {
+            throw new ValidationError(
+              `section.items[${j}] must be an object (in section ${section.category})`
+            );
+          }
+          if (
+            !item.item ||
+            typeof item.item !== "string" ||
+            item.item.trim().length === 0
+          ) {
+            throw new ValidationError(
+              `item.item is required and must be a non-empty string (in section: ${section.category}, item index: ${j})`
+            );
+          }
+          if (typeof item.price === "undefined") {
+            throw new ValidationError(
+              `item.price is required (in section: ${section.category}, item: "${item.item}")`
+            );
+          }
+          // price can be a number or a string (e.g. "TBD" or "30% + original cost")
+          if (
+            typeof item.price !== "number" &&
+            typeof item.price !== "string"
+          ) {
+            throw new ValidationError(
+              `item.price must be a number or string (in section: ${section.category}, item: "${item.item}")`
+            );
+          }
+        });
+      });
+      // Optional: value.metadata (object or null)
+      if (typeof value.metadata !== "undefined" && value.metadata !== null) {
+        if (typeof value.metadata !== "object") {
+          throw new ValidationError("metadata must be an object if provided");
+        }
+        // minimal type check, could be more strict if you want
+      }
+      // Optional: value.terms_and_conditions (array of strings)
+      if (
+        typeof value.terms_and_conditions !== "undefined" &&
+        value.terms_and_conditions !== null
+      ) {
+        if (
+          !Array.isArray(value.terms_and_conditions) ||
+          !value.terms_and_conditions.every((tc) => typeof tc === "string")
+        ) {
+          throw new ValidationError(
+            "terms_and_conditions must be an array of strings if provided"
+          );
+        }
       }
       break;
 
