@@ -360,8 +360,8 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - Return structured context object
 - [ ] Implement `mapServicesToRateCard(requirements, rateCard)`:
   - Fuzzy matching algorithm
-  - Handle "TBD" prices gracefully
-  - Map project services to rate card items
+  - Handle "TBD" prices gracefully and decide a price.
+  - Map project services to rate card items might not be exact match.
 - [ ] Implement `generateQuoteItemsWithLLM(context)`:
   - Use QuotePromptService to generate items
   - Call LLM with structured schema

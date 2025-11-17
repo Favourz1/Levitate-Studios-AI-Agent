@@ -1081,7 +1081,7 @@ class LevitateStudiosErpIntegration {
    * @param {number} noLetterhead - 0 (Include) or 1 (Exclude) (default: 0)
    * @returns {Promise<Buffer>} PDF binary data
    */
-  async getQuotationPDF(quoteId, format = "Standard", noLetterhead = "0") {
+  async getQuotationPDF(quoteId, format = "test", noLetterhead = "0") {
     const startTime = Date.now();
 
     try {
