@@ -1,6 +1,7 @@
 const { getPrismaClient } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ConflictError } = require("@/utils/errors");
+const { ProjectPhase } = require("@/constants");
 
 const logger = createLogger("service:client");
 const prisma = getPrismaClient();
@@ -260,7 +261,11 @@ class ClientService {
           projects: {
             where: {
               phase: {
-                in: ["QUESTIONNAIRE", "BRAND_ORIGIN", "BUDGET_TIMELINE"],
+                in: [
+                  ProjectPhase.QUESTIONNAIRE,
+                  ProjectPhase.BRAND_ORIGIN,
+                  ProjectPhase.QUOTE_DOCUMENT,
+                ],
               },
             },
           },

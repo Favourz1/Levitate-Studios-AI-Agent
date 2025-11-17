@@ -30,7 +30,7 @@ model Project {
   id              Int      @id @default(autoincrement())
   clientId        Int      @map("client_id")
   name            String
-  phase           String   // QUESTIONNAIRE, BRAND_ORIGIN, BUDGET_TIMELINE, FINALIZED, REJECTED
+  phase           String   // QUESTIONNAIRE, BRAND_ORIGIN, QUOTE_DOCUMENT, FINALIZED, REJECTED
   asanaProjectGid String?  @map("asana_project_gid")
   context         String? @db.Text  // Additional project context
   createdAt       DateTime @default(now()) @map("created_at")
@@ -66,13 +66,14 @@ model ProjectPhaseLog {
 model Document {
   id                Int      @id @default(autoincrement())
   projectId         Int      @map("project_id")
-  type              String   // BRAND_ORIGIN, BUDGET_TIMELINE, BUDGET_TIMELINE_VARIANT
+  type              String   // BRAND_ORIGIN, QUOTE, QUOTE_VARIANT
   status            String   // DRAFT, PM_REVIEW, SENT_TO_CLIENT, CLIENT_FEEDBACK, ACCEPTED, REJECTED
   driveFileId       String?  @map("drive_file_id")
   currentRevisionId Int?     @map("current_revision_id")
   lastSentRevisionId Int?    @map("last_sent_revision_id")
-  isVariant         Boolean  @default(false) @map("is_variant")
-  variantIndex      Int?     @map("variant_index")
+  erpQuoteId        String?  @map("erp_quote_id") // Main quote ID from ERP, used for quotes only
+  erpVariantIds     Json?    @map("erp_variant_ids") @db.JsonB // JSON array of 3 variant quote IDs
+  selectedQuoteId   String?  @map("selected_quote_id") // Which quote ID was sent to client
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

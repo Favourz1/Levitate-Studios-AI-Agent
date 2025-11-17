@@ -17,15 +17,15 @@ const { ValidationError } = require("@/utils/errors");
 const projectPhaseSchema = z.enum([
   ProjectPhase.QUESTIONNAIRE,
   ProjectPhase.BRAND_ORIGIN,
-  ProjectPhase.BUDGET_TIMELINE,
+  ProjectPhase.QUOTE_DOCUMENT,
   ProjectPhase.FINALIZED,
   ProjectPhase.REJECTED,
 ]);
 
 const documentTypeSchema = z.enum([
   DocumentType.BRAND_ORIGIN,
-  DocumentType.BUDGET_TIMELINE,
-  DocumentType.BUDGET_TIMELINE_VARIANT,
+  DocumentType.QUOTE,
+  DocumentType.QUOTE_VARIANT,
 ]);
 
 const documentStatusSchema = z.enum([

@@ -104,11 +104,11 @@ class IntentPromptService {
         case DocumentType.BRAND_ORIGIN:
           return this.getBrandOriginContext();
 
-        case DocumentType.BUDGET_TIMELINE:
-          return this.getBudgetTimelineContext();
+        case DocumentType.QUOTE:
+          return this.getQuoteContext();
 
-        case DocumentType.BUDGET_TIMELINE_VARIANT:
-          return this.getBudgetTimelineVariantContext();
+        case DocumentType.QUOTE_VARIANT:
+          return this.getQuoteVariantContext();
 
         default:
           // Check if it's a known document type but not implemented
@@ -312,13 +312,13 @@ The Brand Origin document follows a specific 12-section structure designed to pr
   }
 
   /**
-   * Get Budget Timeline specific context for intent analysis
-   * @returns {Object} Budget Timeline context
+   * Get Quote specific context for intent analysis
+   * @returns {Object} Quote context
    */
-  static getBudgetTimelineContext() {
+  static getQuoteContext() {
     return {
       intentType: "DOCUMENT_ANALYSIS",
-      documentType: DocumentType.BUDGET_TIMELINE,
+      documentType: DocumentType.QUOTE,
       structure: {
         sections: [
           "Project Overview",
@@ -361,9 +361,9 @@ The Brand Origin document follows a specific 12-section structure designed to pr
           "Professional service standards",
         ],
       },
-      contextPrompt: `### Budget Timeline Document Structure & Requirements
+      contextPrompt: `### Quote Document Structure & Requirements
 
-The Budget Timeline document provides comprehensive project planning and financial breakdown:
+The Quote document provides comprehensive financial breakdown:
 
 **Required Elements:**
 - **Project Overview** - Clear description of project goals and objectives
@@ -391,14 +391,14 @@ The Budget Timeline document provides comprehensive project planning and financi
   }
 
   /**
-   * Get Budget Timeline Variant specific context for intent analysis
-   * @returns {Object} Budget Timeline Variant context
+   * Get Quote Variant specific context for intent analysis
+   * @returns {Object} Quote Variant context
    */
-  static getBudgetTimelineVariantContext() {
-    const baseContext = this.getBudgetTimelineContext();
+  static getQuoteVariantContext() {
+    const baseContext = this.getQuoteContext();
     return {
       ...baseContext,
-      documentType: DocumentType.BUDGET_TIMELINE_VARIANT,
+      documentType: DocumentType.QUOTE_VARIANT,
       analysisGuidelines: {
         ...baseContext.analysisGuidelines,
         feedbackTypes: [

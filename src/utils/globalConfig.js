@@ -48,7 +48,7 @@ const validateConfigValue = (key, value) => {
       const requiredSections = [
         AsanaPendingProjectsBoardSections.FILLED_QUESTIONNAIRE,
         AsanaPendingProjectsBoardSections.BRAND_ORIGIN_DOC_PHASE,
-        AsanaPendingProjectsBoardSections.BUDGET_TIMELINE_PHASE,
+        AsanaPendingProjectsBoardSections.QUOTE_DOCUMENT_PHASE,
         AsanaPendingProjectsBoardSections.FINALIZED,
         AsanaPendingProjectsBoardSections.REJECTED,
       ];

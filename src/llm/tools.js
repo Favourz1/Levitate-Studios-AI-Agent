@@ -8,7 +8,7 @@ const { QueueService } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ValidationError } = require("@/utils/errors");
 const { generateDedupeKey } = require("@/utils");
-const { DocumentStatus, ProjectPhase } = require("@/constants");
+const { DocumentStatus, ProjectPhase, DocumentType } = require("@/constants");
 
 const logger = createLogger("llm:tools");
 const prisma = getPrismaClient();
@@ -177,11 +177,7 @@ const writeDocumentTool = tool({
   description: "Create or update a document with new content",
   parameters: z.object({
     projectId: z.number().int().positive(),
-    documentType: z.enum([
-      "BRAND_ORIGIN",
-      "BUDGET_TIMELINE",
-      "BUDGET_TIMELINE_VARIANT",
-    ]),
+    documentType: z.enum(Object.values(DocumentType)),
     content: z.string().min(1),
     title: z.string().max(200),
     isVariant: z.boolean().default(false),
@@ -257,8 +253,7 @@ const writeDocumentTool = tool({
 
 // Tool for creating document variants
 const createDocumentVariantTool = tool({
-  description:
-    "Create variant documents for budget/timeline with different approaches",
+  description: "Create variant documents for quote with different approaches",
   parameters: z.object({
     baseDocumentId: z.number().int().positive(),
     variantContent: z
@@ -293,7 +288,7 @@ const createDocumentVariantTool = tool({
           const document = await prisma.document.create({
             data: {
               projectId: baseDocument.projectId,
-              type: "BUDGET_TIMELINE_VARIANT",
+              type: DocumentType.QUOTE_VARIANT,
               status: DocumentStatus.DRAFT,
               driveFileId: googleDoc.id,
               isVariant: true,
@@ -447,7 +442,7 @@ const advanceProjectStateTool = tool({
     newPhase: z.enum([
       ProjectPhase.QUESTIONNAIRE,
       ProjectPhase.BRAND_ORIGIN,
-      ProjectPhase.BUDGET_TIMELINE,
+      ProjectPhase.QUOTE_DOCUMENT,
       ProjectPhase.FINALIZED,
       ProjectPhase.REJECTED,
     ]),

@@ -1617,7 +1617,7 @@ ${
  * Send PM notification email with Review/Send buttons
  * @param {Object} context - Project context
  * @param {Object} documentResult - Created document information
- * @param {string} documentType - Type of document (BRAND_ORIGIN, BUDGET_TIMELINE, BUDGET_TIMELINE_VARIANT)
+ * @param {string} documentType - Type of document (BRAND_ORIGIN, QUOTE, QUOTE_VARIANT)
  * @param {string} correlationId - Correlation ID for tracking
  * @param {Object} feedbackContext - Optional feedback context for regeneration
  */
@@ -1694,15 +1694,15 @@ async function sendPMAdminNotificationEmail(
                 context.emailThread,
                 actionTokens
               );
-        case DocumentType.BUDGET_TIMELINE:
-          return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
+        case DocumentType.QUOTE:
+          return EmailTemplateService.generateQuoteNotificationTemplate(
             context.project,
             documentResult,
             context.emailThread,
             actionTokens
           );
-        case DocumentType.BUDGET_TIMELINE_VARIANT:
-          return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
+        case DocumentType.QUOTE_VARIANT:
+          return EmailTemplateService.generateQuoteVariantNotificationTemplate(
             context.project,
             documentResult,
             context.emailThread,
@@ -1796,15 +1796,15 @@ async function sendPMAdminNotificationEmail(
                     context.emailThread,
                     adminActionTokens
                   );
-            case DocumentType.BUDGET_TIMELINE:
-              return EmailTemplateService.generateBudgetTimelineNotificationTemplate(
+            case DocumentType.QUOTE:
+              return EmailTemplateService.generateQuoteNotificationTemplate(
                 context.project,
                 documentResult,
                 context.emailThread,
                 adminActionTokens
               );
-            case DocumentType.BUDGET_TIMELINE_VARIANT:
-              return EmailTemplateService.generateBudgetTimelineVariantNotificationTemplate(
+            case DocumentType.QUOTE_VARIANT:
+              return EmailTemplateService.generateQuoteVariantNotificationTemplate(
                 context.project,
                 documentResult,
                 context.emailThread,

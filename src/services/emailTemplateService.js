@@ -126,13 +126,13 @@ class EmailTemplateService {
    * Generate document review notification template
    * @param {Object} document - Document data
    * @param {Object} project - Project data
-   * @param {string} documentType - Type of document (brand_origin, budget_timeline)
+   * @param {string} documentType - Type of document (brand_origin, quote)
    * @returns {Object} Email template with subject and htmlContent
    */
   static generateDocumentReviewTemplate(document, project, documentType) {
     try {
       const documentTypeName =
-        documentType === "brand_origin" ? "Brand Origin" : "Budget/Timeline";
+        documentType === "brand_origin" ? "Brand Origin" : "Quote";
       const subject = `${documentTypeName} Document Ready for Review: ${project.name}`;
 
       const htmlContent = `
@@ -549,10 +549,10 @@ class EmailTemplateService {
   static generateDocumentAcceptanceTemplate(document, project, documentType) {
     try {
       const documentTypeName =
-        documentType === "brand_origin" ? "Brand Origin" : "Budget/Timeline";
+        documentType === "brand_origin" ? "Brand Origin" : "Quote";
       const nextAction =
         documentType === "brand_origin"
-          ? "create Budget/Timeline document"
+          ? "create Quote document"
           : "initialize project";
 
       const subject = `Confirm ${documentTypeName} Document Acceptance: ${project.name}`;
@@ -575,8 +575,8 @@ class EmailTemplateService {
           <a href="#" 
              style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
             Confirm & ${
-              nextAction === "create Budget/Timeline document"
-                ? "Create Budget/Timeline"
+              nextAction === "create Quote document"
+                ? "Create Quote"
                 : "Initialize Project"
             } →
           </a>
@@ -717,7 +717,7 @@ class EmailTemplateService {
   ) {
     try {
       const documentTypeName =
-        document.type === "BRAND_ORIGIN" ? "Brand Origin" : "Budget/Timeline";
+        document.type === "BRAND_ORIGIN" ? "Brand Origin" : "Quote";
       const subject = `${documentTypeName} Document - ${project.name}`;
 
       const htmlContent = `

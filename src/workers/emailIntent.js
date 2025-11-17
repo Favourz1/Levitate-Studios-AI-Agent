@@ -562,8 +562,8 @@ IMPORTANT CONSIDERATIONS:
     ProjectPhase.BRAND_ORIGIN
   } and there's a Brand Origin document, focus on feedback related to that
 - If the project phase is ${
-    ProjectPhase.BUDGET_TIMELINE
-  } and there's a Budget/Timeline document, focus on feedback related to that
+    ProjectPhase.QUOTE_DOCUMENT
+  } and there's a Quote document, focus on feedback related to that
 - Consider the conversation history to understand context
 - Be conservative with ACCEPT - client must be clearly approving
 - Set requiresAction to true for DOC_FEEDBACK, ACCEPT, or REJECT intents
@@ -882,8 +882,8 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
     );
 
     // TODO: In future iterations, implement automatic phase progression:
-    // - If Brand Origin accepted → trigger Budget/Timeline generation
-    // - If Budget/Timeline accepted → trigger project finalization
+    // - If Brand Origin accepted → trigger Quote generation
+    // - If Quote accepted → trigger Asana project initialization
     // For now, requires manual PM confirmation as per Implementation Plan
 
     return {

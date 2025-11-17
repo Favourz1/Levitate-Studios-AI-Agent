@@ -22,8 +22,8 @@ const isValidPhaseTransition = (fromPhase, toPhase) => {
   const validTransitions = {
     null: ["QUESTIONNAIRE"],
     QUESTIONNAIRE: ["BRAND_ORIGIN", "REJECTED"],
-    BRAND_ORIGIN: ["BUDGET_TIMELINE", "REJECTED"],
-    BUDGET_TIMELINE: ["FINALIZED", "REJECTED"],
+    BRAND_ORIGIN: ["QUOTE_DOCUMENT", "REJECTED"],
+    QUOTE_DOCUMENT: ["FINALIZED", "REJECTED"],
     FINALIZED: [], // Final state
     REJECTED: [], // Final state
   };
