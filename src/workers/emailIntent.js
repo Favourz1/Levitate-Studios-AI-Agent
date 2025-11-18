@@ -781,12 +781,13 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
         emailId: email.id,
         projectId: project.id,
         documentId: currentDocument.id,
+        documentType: currentDocument.type,
         correlationId,
       },
-      "Document status updated to CLIENT_FEEDBACK - Starting regeneration workflow"
+      "Document status updated to CLIENT_FEEDBACK - Starting regeneration/update workflow"
     );
 
-    // Step 3: Trigger automatic document regeneration based on feedback
+    // Step 3: Trigger automatic document regeneration/update based on feedback
     await triggerDocumentRegeneration(context, intentResult, correlationId);
 
     return {
@@ -1424,7 +1425,7 @@ async function triggerDocumentRegeneration(
           },
         };
 
-        // Enqueue document regeneration job based on document type
+        // Enqueue document regeneration/update job based on document type
         switch (currentDocument.type) {
           case DocumentType.BRAND_ORIGIN:
             const jobData = {
@@ -1451,6 +1452,34 @@ async function triggerDocumentRegeneration(
             );
             break;
 
+          case DocumentType.QUOTE:
+            // For QUOTE documents, use quote update job (not regeneration)
+            const quoteUpdateJobData = {
+              projectId: project.id,
+              documentId: currentDocument.id,
+              correlationId,
+              feedbackContext,
+              intentResult,
+              timestamp: new Date().toISOString(),
+            };
+
+            const quoteUpdateJob = await QueueService.addQuoteUpdateJob(
+              quoteUpdateJobData,
+              2 // High priority for client feedback
+            );
+
+            logger.info(
+              {
+                jobId: quoteUpdateJob.id,
+                emailId: email.id,
+                projectId: project.id,
+                documentId: currentDocument.id,
+                correlationId,
+              },
+              "Quote update job enqueued successfully"
+            );
+            break;
+
           default:
             logger.warn(
               {
@@ -1458,7 +1487,7 @@ async function triggerDocumentRegeneration(
                 documentType: currentDocument.type,
                 correlationId,
               },
-              "Document type not supported for automatic regeneration"
+              "Document type not supported for automatic regeneration/update"
             );
             // For unsupported document types, just log and continue
             // Future: Add support for other document types

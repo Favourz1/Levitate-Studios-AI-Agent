@@ -2,6 +2,9 @@ const crypto = require("crypto");
 const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { QuoteService } = require("@/services/quoteService");
+const { QuotePromptService } = require("@/services/quotePromptService");
+const { llmClient } = require("@/llm/client");
+const { erpIntegration } = require("@/integrations/levitateStudiosErp");
 const {
   DocumentType,
   DocumentStatus,
@@ -26,10 +29,43 @@ const prisma = getPrismaClient();
 const logger = createLogger("worker:quoteGeneration");
 
 /**
- * Quote Generation Processor
- * Handles full quote workflow: LLM → ERP → Drive → DB → Asana → Email
+ * Main Quote Processor
+ * Routes to appropriate processor based on job name
  */
 const quoteGenerationProcessor = async (job) => {
+  const jobName = job.name;
+
+  logger.info(
+    {
+      jobId: job.id,
+      jobName,
+      data: job.data,
+    },
+    "Processing quote job"
+  );
+
+  switch (jobName) {
+    case "generate-quote":
+      return await quoteGenerationProcessorImpl(job);
+    case "update-quote":
+      return await updateQuoteProcessor(job);
+    default:
+      logger.warn(
+        {
+          jobId: job.id,
+          jobName,
+        },
+        "Unknown quote job name - defaulting to generation"
+      );
+      return await quoteGenerationProcessorImpl(job);
+  }
+};
+
+/**
+ * Quote Generation Processor Implementation
+ * Handles full quote workflow: LLM → ERP → Drive → DB → Asana → Email
+ */
+const quoteGenerationProcessorImpl = async (job) => {
   const startTime = Date.now();
   const {
     projectId,
@@ -421,7 +457,10 @@ async function sendQuoteNotifications(
   }
 
   // For admin, we need to find admin user ID in team_members table
-  if (appConfig.server.adminEmail && appConfig.server.nodeEnv === "production") {
+  if (
+    appConfig.server.adminEmail &&
+    appConfig.server.nodeEnv === "production"
+  ) {
     recipients.add(appConfig.server.adminEmail);
     // Fetch admin team member ID from database
     try {
@@ -614,6 +653,597 @@ async function logQuoteGenerationFailure(projectId, correlationId, message) {
   }
 }
 
+/**
+ * Quote Update Processor
+ * Handles quote updates based on client feedback
+ * Updates the selected quote (main or variant) in ERP and creates new revision
+ */
+const updateQuoteProcessor = async (job) => {
+  const startTime = Date.now();
+  const {
+    projectId,
+    documentId,
+    feedbackContext,
+    intentResult,
+    correlationId: jobCorrelationId,
+  } = job.data || {};
+  const correlationId = jobCorrelationId || crypto.randomUUID();
+
+  if (!projectId || typeof projectId !== "number") {
+    const message = "Quote update job missing valid projectId";
+    logger.error({ jobId: job.id, projectId, correlationId }, message);
+    throw new Error(message);
+  }
+
+  if (!documentId || typeof documentId !== "number") {
+    const message = "Quote update job missing valid documentId";
+    logger.error({ jobId: job.id, documentId, correlationId }, message);
+    throw new Error(message);
+  }
+
+  logger.info(
+    {
+      jobId: job.id,
+      projectId,
+      documentId,
+      correlationId,
+    },
+    "Starting quote update workflow"
+  );
+
+  try {
+    // Step 1: Get document and verify it's a QUOTE document with selected quote
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      include: {
+        project: {
+          include: {
+            client: true,
+            questionnaireResponses: {
+              where: { processingStatus: "PROCESSED" },
+              orderBy: { submittedAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+        lastSentRevision: true,
+      },
+    });
+
+    if (!document) {
+      throw new Error(`Document not found: ${documentId}`);
+    }
+
+    if (document.type !== DocumentType.QUOTE) {
+      throw new Error(
+        `Document ${documentId} is not a QUOTE document (type: ${document.type})`
+      );
+    }
+
+    if (!document.selectedQuoteId) {
+      throw new Error(
+        `Document ${documentId} does not have a selected quote ID. Cannot update quote without knowing which quote to update.`
+      );
+    }
+
+    const selectedQuoteId = document.selectedQuoteId;
+    logger.info(
+      {
+        documentId,
+        selectedQuoteId,
+        correlationId,
+      },
+      "Found selected quote ID for update"
+    );
+
+    // Step 2: Verify quote is not cancelled and get current quote details
+    let quoteDetails = await erpIntegration.getQuotation(selectedQuoteId);
+
+    if (quoteDetails.quotation_canceled) {
+      logger.warn(
+        {
+          selectedQuoteId,
+          latestCanceledId: quoteDetails.latest_canceled_id,
+          correlationId,
+        },
+        "Selected quote is cancelled - will amend to create new draft"
+      );
+    }
+
+    // Step 3: Get current quote items
+    const currentQuoteItems = quoteDetails.items || [];
+    if (!Array.isArray(currentQuoteItems) || currentQuoteItems.length === 0) {
+      throw new Error(`Quote ${selectedQuoteId} has no items to update`);
+    }
+
+    logger.info(
+      {
+        selectedQuoteId,
+        currentItemCount: currentQuoteItems.length,
+        correlationId,
+      },
+      "Retrieved current quote items"
+    );
+
+    // Step 4: Assemble context for LLM quote update
+    const context = await QuoteService.assembleQuoteContext(projectId);
+
+    // Step 5: Generate updated quote items using LLM
+    const updatePrompt = QuotePromptService.generateQuoteUpdatePrompt(
+      currentQuoteItems,
+      feedbackContext,
+      intentResult,
+      context
+    );
+
+    const quoteItemsSchema = QuotePromptService.generateQuoteItemsSchema();
+    const updateResult = await llmClient.generateStructured(
+      quoteItemsSchema,
+      updatePrompt,
+      {
+        systemPrompt: QuotePromptService.generateSystemPrompt(context),
+        projectId: document.project.id,
+        clientName: document.project.client.name,
+      },
+      "generation"
+    );
+
+    if (
+      !updateResult.data ||
+      !Array.isArray(updateResult.data) ||
+      updateResult.data.length === 0
+    ) {
+      throw new Error("LLM returned empty or invalid updated quote items");
+    }
+
+    const updatedQuoteItems = updateResult.data;
+    logger.info(
+      {
+        documentId,
+        selectedQuoteId,
+        originalItemCount: currentQuoteItems.length,
+        updatedItemCount: updatedQuoteItems.length,
+        correlationId,
+      },
+      "Generated updated quote items from LLM"
+    );
+
+    // Step 6: Ensure all items exist in ERP (CRITICAL - must be done before update)
+    const validatedQuoteItems = await QuoteService.ensureItemsExist(
+      updatedQuoteItems
+    );
+
+    logger.info(
+      {
+        documentId,
+        validatedItemCount: validatedQuoteItems.length,
+        correlationId,
+      },
+      "All quote items validated in ERP"
+    );
+
+    // Step 7: Update or amend quote in ERP
+    let finalQuoteId = selectedQuoteId;
+    const customerName = await QuoteService.ensureCustomerExists(
+      document.project.client
+    );
+
+    if (quoteDetails.quotation_canceled) {
+      // Quote is cancelled - need to amend
+      logger.info(
+        {
+          cancelledQuoteId: selectedQuoteId,
+          latestCanceledId: quoteDetails.latest_canceled_id,
+          correlationId,
+        },
+        "Amending cancelled quote to create new draft"
+      );
+
+      const amendData = {
+        customer: customerName,
+        items: validatedQuoteItems.map((item) => ({
+          item_code: item.item_code,
+          qty: item.qty || 1,
+          rate: item.rate,
+          description: item.description,
+        })),
+        transaction_date: new Date().toISOString().split("T")[0],
+      };
+
+      const amendResult = await erpIntegration.amendQuotation(
+        quoteDetails.latest_canceled_id || selectedQuoteId,
+        amendData
+      );
+
+      // CRITICAL: Response returns new quote ID in data.name
+      finalQuoteId = amendResult.newQuoteId || amendResult.quoteId;
+      if (!finalQuoteId) {
+        throw new Error(
+          "Amend quotation response missing new quote ID in data.name"
+        );
+      }
+
+      logger.info(
+        {
+          cancelledQuoteId: selectedQuoteId,
+          newQuoteId: finalQuoteId,
+          correlationId,
+        },
+        "Quote amended successfully - using new quote ID"
+      );
+    } else {
+      // Quote is draft - can update directly
+      if (quoteDetails.docstatus !== 0) {
+        throw new Error(
+          `Cannot update quote with docstatus ${quoteDetails.docstatus}. Only draft quotes (docstatus: 0) can be updated.`
+        );
+      }
+
+      logger.info(
+        {
+          quoteId: selectedQuoteId,
+          correlationId,
+        },
+        "Updating draft quote in ERP"
+      );
+
+      const updateData = {
+        items: validatedQuoteItems.map((item) => ({
+          item_code: item.item_code,
+          qty: item.qty || 1,
+          rate: item.rate,
+          description: item.description,
+        })),
+      };
+
+      await erpIntegration.updateQuotation(selectedQuoteId, updateData);
+
+      logger.info(
+        {
+          quoteId: selectedQuoteId,
+          correlationId,
+        },
+        "Quote updated successfully in ERP"
+      );
+    }
+
+    // Step 8: Download updated quote PDF
+    const pdfBuffer = await erpIntegration.getQuotationPDF(finalQuoteId);
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new Error("PDF download did not return a buffer");
+    }
+
+    logger.info(
+      {
+        quoteId: finalQuoteId,
+        pdfSize: pdfBuffer.length,
+        correlationId,
+      },
+      "Downloaded updated quote PDF from ERP"
+    );
+
+    // Step 9: Upload PDF to Google Drive
+    const documentsFolder = await googleIntegration.ensureDocumentsFolder();
+    const pdfName =
+      `QUOTE_${document.project.client.name}_${document.project.name}_${finalQuoteId}_UPDATED`.replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_"
+      );
+
+    const driveFile = await googleIntegration.uploadFileFromBuffer(
+      pdfBuffer,
+      pdfName,
+      "application/pdf",
+      documentsFolder.id
+    );
+
+    logger.info(
+      {
+        quoteId: finalQuoteId,
+        driveFileId: driveFile.id,
+        correlationId,
+      },
+      "Uploaded updated quote PDF to Google Drive"
+    );
+
+    // Step 10: Create new document revision and update document
+    const updateResult_db = await withTransaction(async (tx) => {
+      // Create new revision
+      const revisionPayload = {
+        updatedAt: new Date().toISOString(),
+        quoteId: finalQuoteId,
+        previousQuoteId: selectedQuoteId,
+        driveFile: {
+          id: driveFile.id,
+          name: driveFile.name,
+          webViewLink: driveFile.webViewLink,
+        },
+        quoteItems: validatedQuoteItems,
+        feedbackSummary: intentResult.summary,
+        requestedChanges: intentResult.requestedChanges || [],
+      };
+
+      const revision = await tx.documentRevision.create({
+        data: {
+          documentId: documentId,
+          driveRevisionId: driveFile.id,
+          snapshotText: JSON.stringify(revisionPayload, null, 2),
+          snapshotMd: revisionPayload,
+          createdBy: CreatedBy.AGENT,
+          summary: `Quote updated based on client feedback. ${
+            intentResult.requestedChanges?.length || 0
+          } changes requested.`,
+          createdAt: new Date(),
+        },
+      });
+
+      // Update document with new revision and selected quote ID (if amended)
+      const updateData = {
+        currentRevisionId: revision.id,
+        lastSentRevisionId: revision.id, // Update last sent revision
+        updatedAt: new Date(),
+      };
+
+      // If quote was amended, update selectedQuoteId to new quote ID
+      if (finalQuoteId !== selectedQuoteId) {
+        updateData.selectedQuoteId = finalQuoteId;
+        // Also update driveFileId to new PDF
+        updateData.driveFileId = driveFile.id;
+      }
+
+      await tx.document.update({
+        where: { id: documentId },
+        data: updateData,
+      });
+
+      // Create audit log
+      await tx.auditLog.create({
+        data: {
+          projectId,
+          actor: SystemActors.QUOTE_GENERATOR,
+          action: AuditActions.QUOTE_REGENERATED,
+          details: {
+            documentId,
+            previousQuoteId: selectedQuoteId,
+            updatedQuoteId: finalQuoteId,
+            wasAmended: finalQuoteId !== selectedQuoteId,
+            itemCount: validatedQuoteItems.length,
+            feedbackSummary: intentResult.summary,
+            requestedChangesCount: intentResult.requestedChanges?.length || 0,
+            correlationId,
+          },
+          at: new Date(),
+        },
+      });
+
+      return {
+        revisionId: revision.id,
+        documentId,
+        quoteId: finalQuoteId,
+      };
+    });
+
+    // Step 11: Notify Finance Manager about quote update
+    const financeUser =
+      (await AsanaPendingProjectsService.getFinanceManager(projectId)) || null;
+
+    if (financeUser?.email) {
+      try {
+        // Create action token for sending updated quote to client
+        let sendToClientToken = null;
+        try {
+          if (financeUser.id) {
+            const actionTokenResult = await ActionService.createActionToken(
+              {
+                action: ActionType.SEND_TO_CLIENT,
+                documentId: documentId,
+                projectId: projectId,
+                userId: financeUser.id,
+                userEmail: financeUser.email,
+                userName: financeUser.name || "Finance Manager",
+              },
+              "24h" // Token valid for 24 hours
+            );
+            sendToClientToken = actionTokenResult.token;
+
+            logger.debug(
+              {
+                documentId,
+                quoteId: finalQuoteId,
+                userId: financeUser.id,
+                correlationId,
+              },
+              "Action token created for updated quote"
+            );
+          }
+        } catch (tokenError) {
+          logger.warn(
+            {
+              documentId,
+              quoteId: finalQuoteId,
+              error: tokenError.message,
+              correlationId,
+            },
+            "Failed to create action token for updated quote - email will be sent without send button"
+          );
+        }
+
+        const emailTemplate =
+          EmailTemplateService.generateQuoteUpdateNotificationTemplate(
+            document.project,
+            {
+              quoteId: finalQuoteId,
+              previousQuoteId: selectedQuoteId,
+              wasAmended: finalQuoteId !== selectedQuoteId,
+              driveFile,
+              feedbackSummary: intentResult.summary,
+              requestedChanges: intentResult.requestedChanges || [],
+              sendToClientToken,
+            }
+          );
+
+        await brevoIntegration.sendTransactionalEmail({
+          to: [financeUser.email],
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+          textContent: "",
+          senderName: "Levitate Studios AI Agent",
+          senderEmail: `noreply@${appConfig.emailDomain}`,
+        });
+
+        logger.info(
+          {
+            financeEmail: financeUser.email,
+            quoteId: finalQuoteId,
+            correlationId,
+          },
+          "Quote update notification sent to Finance Manager"
+        );
+      } catch (emailError) {
+        logger.warn(
+          {
+            financeEmail: financeUser.email,
+            error: emailError.message,
+            correlationId,
+          },
+          "Failed to send quote update notification email"
+        );
+      }
+    }
+
+    // Step 12: Add Asana comment
+    try {
+      const moveResult = await AsanaPendingProjectsService.moveTaskToSection(
+        projectId,
+        AsanaPendingProjectsBoardSections.QUOTE_DOCUMENT_PHASE,
+        { correlationId }
+      );
+
+      if (moveResult?.taskGid) {
+        const financeMention =
+          financeUser?.asanaUserGid && financeUser?.name
+            ? `<a data-asana-gid="${financeUser.asanaUserGid}" data-asana-type="user">@${financeUser.name}</a>`
+            : "Finance Manager";
+
+        const commentHtml = `<body>
+💼 <strong>Quote Updated Based on Client Feedback</strong>
+The quote has been updated based on client feedback. ${
+          intentResult.requestedChanges?.length || 0
+        } changes were requested.
+
+${financeMention} please review the updated quote via email sent to you and send to client if approved.
+</body>`;
+
+        await asanaIntegration.addTaskComment(moveResult.taskGid, commentHtml);
+
+        logger.info(
+          {
+            projectId,
+            taskGid: moveResult.taskGid,
+            correlationId,
+          },
+          "Added Asana comment for quote update"
+        );
+      }
+    } catch (asanaError) {
+      logger.warn(
+        {
+          projectId,
+          error: asanaError.message,
+          correlationId,
+        },
+        "Failed to add Asana comment for quote update"
+      );
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info(
+      {
+        jobId: job.id,
+        projectId,
+        documentId,
+        previousQuoteId: selectedQuoteId,
+        updatedQuoteId: finalQuoteId,
+        wasAmended: finalQuoteId !== selectedQuoteId,
+        duration,
+        correlationId,
+      },
+      "Quote update workflow completed successfully"
+    );
+
+    return {
+      success: true,
+      projectId,
+      documentId,
+      previousQuoteId: selectedQuoteId,
+      updatedQuoteId: finalQuoteId,
+      wasAmended: finalQuoteId !== selectedQuoteId,
+      processingTime: duration,
+    };
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error(
+      {
+        jobId: job.id,
+        projectId,
+        documentId,
+        error: error.message,
+        duration,
+        correlationId,
+      },
+      "Quote update workflow failed"
+    );
+
+    await logQuoteUpdateFailure(
+      projectId,
+      documentId,
+      correlationId,
+      error.message
+    );
+    throw error;
+  }
+};
+
+/**
+ * Log quote update failures for observability
+ */
+async function logQuoteUpdateFailure(
+  projectId,
+  documentId,
+  correlationId,
+  message
+) {
+  try {
+    await withTransaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          projectId,
+          actor: SystemActors.QUOTE_GENERATOR,
+          action: AuditActions.QUOTE_GENERATION_FAILED,
+          details: {
+            documentId,
+            error: message,
+            correlationId,
+            updateType: "QUOTE_UPDATE",
+          },
+          at: new Date(),
+        },
+      });
+    });
+  } catch (logError) {
+    logger.error(
+      {
+        projectId,
+        documentId,
+        correlationId,
+        logError: logError.message,
+      },
+      "Failed to log quote update failure"
+    );
+  }
+}
+
 module.exports = {
   quoteGenerationProcessor,
+  updateQuoteProcessor,
 };

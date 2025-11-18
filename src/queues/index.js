@@ -134,6 +134,27 @@ class QueueService {
     return queues.quoteGeneration.add("generate-quote", jobData, jobOptions);
   }
 
+  // Quote update jobs (for feedback-based updates)
+  static async addQuoteUpdateJob(data, priority = 2) {
+    const dedupeKey =
+      data.dedupeKey ||
+      `project:${data.projectId}:quote:update:${data.documentId}:${
+        data.feedbackContext?.emailId || Date.now()
+      }`;
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority, // Higher priority for updates (client feedback)
+      jobId: dedupeKey,
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+    };
+
+    return queues.quoteGeneration.add("update-quote", jobData, jobOptions);
+  }
+
   // Asana project initialization jobs
   static async addAsanaProjectInitJob(data, priority = 0) {
     const jobOptions = {

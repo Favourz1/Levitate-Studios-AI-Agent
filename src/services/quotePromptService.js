@@ -612,6 +612,119 @@ Generate the variant quote items array now.`;
 
     return Array.isArray(services) ? services : [services];
   }
+
+  /**
+   * Generate prompt for quote update based on client feedback
+   * @param {Array} currentQuoteItems - Current quote items from ERP
+   * @param {Object} feedbackContext - Client feedback context
+   * @param {Object} intentResult - Intent detection result with requested changes
+   * @param {Object} context - Original project context
+   * @returns {string} Quote update prompt
+   */
+  static generateQuoteUpdatePrompt(
+    currentQuoteItems,
+    feedbackContext,
+    intentResult,
+    context
+  ) {
+    const requestedChanges = intentResult.requestedChanges || [];
+    const clientEmail = feedbackContext.emailInfo?.textBody || "";
+    const summary = intentResult.summary || "";
+
+    return `# Quote Update Task Based on Client Feedback
+
+## Current Quote Items
+${JSON.stringify(currentQuoteItems, null, 2)}
+
+## Client Feedback
+**Summary:** ${summary}
+
+**Client Email:**
+${clientEmail.substring(0, 2000)}
+
+**Requested Changes:**
+${
+  requestedChanges.length > 0
+    ? requestedChanges
+        .map(
+          (change, idx) =>
+            `${idx + 1}. **${change.section || "General"}**: ${
+              change.change
+            } (Priority: ${change.priority || "medium"}, Feasibility: ${
+              change.feasibility || "moderate"
+            })`
+        )
+        .join("\n")
+    : "No specific changes requested - analyze email for implicit changes"
+}
+
+## Original Project Context
+${this.formatQuestionnaireForPrompt(context.questionnaire?.raw || {})}
+
+## Rate Card Reference
+${this.formatRateCardForPrompt(context.rateCard || {})}
+
+## Your Task: Update Quote Items
+
+### Phase 1: Analyze Feedback
+1. **Identify Changes Needed**
+   - What items need to be modified?
+   - What items need to be added?
+   - What items need to be removed?
+   - Are there pricing adjustments needed?
+   - Are there quantity changes needed?
+
+2. **Map Changes to Current Quote**
+   - Match feedback to existing quote items
+   - Identify new services mentioned in feedback
+   - Determine which items should be removed if mentioned
+
+### Phase 2: Generate Updated Quote Items
+For the updated quote, you must:
+- **Keep existing items** that are not mentioned in feedback
+- **Modify items** that need changes (pricing, quantity, description)
+- **Add new items** for services mentioned in feedback
+- **Remove items** if explicitly requested or no longer needed
+- **Ensure all items exist** - use item codes that can be created in ERP
+
+### Phase 3: Item Structure
+Each quote item must include:
+1. **item_code**: Use existing item_code for modifications, or create new descriptive code for new items
+2. **qty**: Updated quantity based on feedback
+3. **rate**: Updated rate based on feedback or rate card
+4. **description**: Updated description reflecting changes
+
+### Important Notes
+- **Items Array Replacement**: The update will completely replace the existing items array
+- **All Items Must Exist**: Ensure all item codes can be created in ERP (they will be created if not exist)
+- **Preserve Valid Items**: Keep items that are not affected by feedback
+- **Rate Card Alignment**: Use rate card for pricing new or modified items
+- **Client Intent**: Focus on what the client is actually requesting
+
+## Output Format
+Generate a JSON array of **ALL** quote items (modified, added, and unchanged) following this structure:
+
+\`\`\`json
+[
+  {
+    "item_code": "BRAND_LOGO",
+    "qty": 1,
+    "rate": 2000000,
+    "description": "Brand Logo Design - Updated description based on feedback"
+  },
+  {
+    "item_code": "NEW_SERVICE",
+    "qty": 2,
+    "rate": 1500000,
+    "description": "New service requested by client"
+  }
+]
+\`\`\`
+
+**CRITICAL**: Include ALL items that should remain in the quote. Items not included will be removed.
+
+Generate the complete updated quote items array now.`;
+  }
 }
 
 module.exports = {
