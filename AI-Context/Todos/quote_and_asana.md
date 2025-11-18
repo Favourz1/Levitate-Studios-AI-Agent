@@ -484,6 +484,8 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - Selection interface
 - [ ] Update existing templates to handle QUOTE document type
 
+**IMPORTANT:** I highly suggest that instead of a separate select quote api/UI etc. In the original email template that is `generateQuoteNotificationTemplate` in `src\services\emailTemplateService.js`. Let there be a "Send to client" button beside all variants and the main in the email template so if the viewer of the email be it Finance manager or admin click on it, it automatically select that quote and send to client. Maybe you want to append some query params to the different button send to client links so you can pass the variant id / quote id so the backend can fetch the right quote variant and send it to client and do every other process needed to send the quote to client and after. This gives better UX.
+
 ### 5.3 Update Document Sending Service (`src/services/documentSendingService.js`)
 
 - [ ] Update `sendDocumentToClient()`:
@@ -491,7 +493,8 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
   - If quote, verify `selected_quote_id` is set
   - Use selected quote PDF (download from ERP if needed)
   - Upload to Drive if not already uploaded
-  - Send email with selected quote PDF
+  - use googleIntegration.shareDocument to share the selected quote drive file with client (no notifications).
+  - Send email to client with selected quote PDF
   - Update `last_sent_revision_id` with quote info
 
 ---
