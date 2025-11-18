@@ -10,11 +10,13 @@ const {
   SystemActors,
   CreatedBy,
   AsanaPendingProjectsBoardSections,
+  ActionType,
 } = require("@/constants");
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
+const { ActionService } = require("@/services/actionService");
 const { brevoIntegration } = require("@/integrations/brevo");
 const { googleIntegration } = require("@/integrations/google");
 const { asanaIntegration } = require("@/integrations/asana");
@@ -399,7 +401,7 @@ ${financeMention} please check your email to review and send the selected quote 
 }
 
 /**
- * Send notification email to Finance/Admin
+ * Send notification email to Finance/Admin with Send to Client buttons
  */
 async function sendQuoteNotifications(
   project,
@@ -409,15 +411,33 @@ async function sendQuoteNotifications(
   correlationId
 ) {
   const recipients = new Set();
+  let financeUserId = null;
+  let adminUserId = null;
 
+  // Get admin team member for action token creation
   if (financeUser?.email) {
     recipients.add(financeUser.email);
+    financeUserId = financeUser.id;
   }
-  if (
-    appConfig.server.adminEmail &&
-    appConfig.server.nodeEnv === "production"
-  ) {
+
+  // For admin, we need to find admin user ID in team_members table
+  if (appConfig.server.adminEmail && appConfig.server.nodeEnv === "production") {
     recipients.add(appConfig.server.adminEmail);
+    // Fetch admin team member ID from database
+    try {
+      const adminTeamMember = await prisma.teamMember.findUnique({
+        where: { email: appConfig.server.adminEmail },
+        select: { id: true },
+      });
+      if (adminTeamMember) {
+        adminUserId = adminTeamMember.id;
+      }
+    } catch (error) {
+      logger.warn(
+        { adminEmail: appConfig.server.adminEmail, error: error.message },
+        "Failed to fetch admin team member ID"
+      );
+    }
   }
 
   if (recipients.size === 0) {
@@ -428,6 +448,110 @@ async function sendQuoteNotifications(
     return;
   }
 
+  // Get the document to use its ID for action tokens
+  const document = await prisma.document.findFirst({
+    where: {
+      projectId: project.id,
+      type: DocumentType.QUOTE,
+    },
+    select: { id: true },
+  });
+
+  if (!document) {
+    logger.warn(
+      { projectId: project.id, correlationId },
+      "No QUOTE document found for creating action tokens"
+    );
+    // Still send email, just without buttons
+    const template = EmailTemplateService.generateQuoteNotificationTemplate(
+      project,
+      {
+        mainQuoteId: quoteSummary.mainQuoteId,
+        variantQuoteIds: quoteSummary.variantQuoteIds,
+        driveFiles,
+        totalItems: quoteSummary.totalItems,
+        sendToClientTokens: {},
+      }
+    );
+
+    await brevoIntegration.sendTransactionalEmail({
+      to: Array.from(recipients),
+      subject: template.subject,
+      htmlContent: template.htmlContent,
+      textContent: "",
+      senderName: "Levitate Studios AI Agent",
+      senderEmail: `noreply@${appConfig.emailDomain}`,
+    });
+
+    logger.info(
+      {
+        projectId: project.id,
+        recipients: Array.from(recipients),
+        correlationId,
+      },
+      "Quote notification email sent (without action tokens)"
+    );
+    return;
+  }
+
+  // Create action tokens for each quote variant
+  const allQuoteIds = [
+    quoteSummary.mainQuoteId,
+    ...quoteSummary.variantQuoteIds,
+  ];
+  const sendToClientTokens = {};
+
+  try {
+    for (const quoteId of allQuoteIds) {
+      // Use finance user if available, otherwise admin user, otherwise skip token creation
+      const userId = financeUserId || adminUserId;
+      const userEmail = financeUser?.email || appConfig.server.adminEmail;
+
+      if (!userId || !userEmail) {
+        logger.warn(
+          { quoteId, correlationId },
+          "Cannot create action token: no valid user ID or email"
+        );
+        continue;
+      }
+
+      const actionTokenResult = await ActionService.createActionToken(
+        {
+          action: ActionType.SEND_TO_CLIENT,
+          documentId: document.id,
+          projectId: project.id,
+          userId,
+          userEmail,
+          userName: financeUser?.name || "Admin",
+        },
+        "24h" // Token valid for 24 hours
+      );
+
+      sendToClientTokens[quoteId] = actionTokenResult.token;
+
+      logger.debug(
+        {
+          quoteId,
+          documentId: document.id,
+          userId,
+          correlationId,
+        },
+        "Action token created for quote"
+      );
+    }
+  } catch (tokenError) {
+    logger.error(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        error: tokenError.message,
+        correlationId,
+      },
+      "Failed to create action tokens for quotes"
+    );
+    // Continue without tokens - email will still be sent
+  }
+
   const template = EmailTemplateService.generateQuoteNotificationTemplate(
     project,
     {
@@ -435,6 +559,7 @@ async function sendQuoteNotifications(
       variantQuoteIds: quoteSummary.variantQuoteIds,
       driveFiles,
       totalItems: quoteSummary.totalItems,
+      sendToClientTokens,
     }
   );
 
@@ -451,6 +576,7 @@ async function sendQuoteNotifications(
     {
       projectId: project.id,
       recipients: Array.from(recipients),
+      tokensCreated: Object.keys(sendToClientTokens).length,
       correlationId,
     },
     "Quote notification email sent"

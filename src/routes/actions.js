@@ -21,11 +21,13 @@ const { getPrismaClient } = require("@/database");
 
 const router = Router();
 const logger = createLogger("routes:actions");
-// TODO: Either update urls or add more info in jwt to know if its for brand origin or budget timeline
+// TODO: Either update urls or add more info in jwt to know if its for brand origin or quote etc.
 
 /**
- * GET /actions/send-to-client?t=<JWT>
+ * GET /actions/send-to-client?t=<JWT>&quoteId=<QUOTE_ID>
  * Send document to client with PDF conversion and email
+ * For QUOTE documents: quoteId query param selects which quote variant to send
+ * For BRAND_ORIGIN documents: no quoteId needed
  */
 router.get(
   "/send-to-client",
@@ -34,6 +36,7 @@ router.get(
     const startTime = Date.now();
     const actionData = req?.actionData; // From authenticateActionToken middleware
     const correlationId = crypto.randomUUID();
+    const quoteId = req.query.quoteId; // Optional quoteId for quote selection
 
     try {
       // Extract and validate action data
@@ -61,6 +64,7 @@ router.get(
           userId,
           userName,
           nonce,
+          quoteId,
           correlationId,
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
@@ -128,7 +132,73 @@ router.get(
         TeamRole.MANAGER,
       ]);
 
-      // Step 4: Process the send-to-client action
+      // Step 4: Handle quote selection for QUOTE documents
+      // If quoteId provided, select it before sending
+      if (quoteId) {
+        const document = await getPrismaClient().document.findUnique({
+          where: { id: documentId },
+          select: {
+            type: true,
+            selectedQuoteId: true,
+            erpVariantIds: true,
+            erpQuoteId: true,
+          },
+        });
+
+        if (!document) {
+          throw new ValidationError(`Document not found: ${documentId}`);
+        }
+
+        // Validate quoteId belongs to this document
+        const validQuoteIds = [
+          document.erpQuoteId,
+          ...(Array.isArray(document.erpVariantIds)
+            ? document.erpVariantIds
+            : []),
+        ].filter(Boolean);
+
+        if (!validQuoteIds.includes(quoteId)) {
+          throw new ValidationError(
+            `Quote ${quoteId} does not belong to this document`
+          );
+        }
+
+        // Update selectedQuoteId
+        await getPrismaClient().document.update({
+          where: { id: documentId },
+          data: {
+            selectedQuoteId: quoteId,
+            updatedAt: new Date(),
+          },
+        });
+
+        // Create audit log for quote selection
+        await ActionService.createAuditLog({
+          projectId,
+          actor: `USER (${userName})`,
+          action: "QUOTE_SELECTED_FOR_SENDING",
+          details: {
+            documentId,
+            quoteId,
+            selectedBy: userName,
+            selectedByEmail: userEmail,
+            correlationId,
+          },
+        });
+
+        logger.info(
+          {
+            documentId,
+            quoteId,
+            userId,
+            userName,
+            correlationId,
+          },
+          "Quote selected for sending"
+        );
+      }
+
+      // Step 5: Process the send-to-client action
       const result = await DocumentSendingService.sendDocumentToClient({
         documentId,
         projectId,
@@ -136,18 +206,19 @@ router.get(
         correlationId,
       });
 
-      // Step 5: Mark nonce as used
+      // Step 6: Mark nonce as used
       await ActionService.markActionNonceUsed(nonce, correlationId, {
         action: "SEND_TO_CLIENT",
         result: "SUCCESS",
         documentId,
         projectId,
         userId,
+        quoteId,
         clientEmail: result.clientEmail,
         pdfFileId: result.pdfFile.id,
       });
 
-      // Step 6: Create audit log entry
+      // Step 7: Create audit log entry
       await ActionService.createAuditLog({
         projectId,
         actor: `USER (${userName})`,
@@ -155,6 +226,8 @@ router.get(
         details: {
           documentId,
           documentType: result.document.type,
+          quoteId: quoteId || null,
+          selectedQuoteId: result.document.selectedQuoteId || null,
           clientEmail: result.clientEmail,
           pdfFileId: result.pdfFile.id,
           pdfName: result.pdfFile.name,
@@ -167,7 +240,7 @@ router.get(
         },
       });
 
-      // Step 7: Send feedback email to user who clicked
+      // Step 8: Send feedback email to user who clicked
       try {
         const feedbackTemplate =
           EmailTemplateService.generateActionSuccessFeedbackTemplate({
@@ -603,9 +676,8 @@ router.get(
           EmailTemplateService.generateActionSuccessFeedbackTemplate({
             to: userEmail,
             userName,
-            action: `${
-              isDocumentLevel ? "Document" : "Project"
-            } rejection confirmed successfully`,
+            action: `${isDocumentLevel ? "Document" : "Project"
+              } rejection confirmed successfully`,
             projectName: projectData?.name || `Project ${projectId}`,
             clientName: projectData?.client?.name || "N/A",
             documentType: isDocumentLevel ? "Document" : "Project",

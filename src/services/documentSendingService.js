@@ -3,8 +3,9 @@ const { createLogger } = require("@/utils/logger");
 const { ValidationError, GoogleError, BaseError } = require("@/utils/errors");
 const { googleIntegration } = require("@/integrations/google");
 const { brevoIntegration } = require("@/integrations/brevo");
+const { erpIntegration } = require("@/integrations/levitateStudiosErp");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
-const { DocumentStatus, SystemEmails } = require("@/constants");
+const { DocumentStatus, SystemEmails, DocumentType } = require("@/constants");
 const { appConfig } = require("@/config");
 
 const logger = createLogger("service:document-sending");
@@ -138,35 +139,98 @@ class DocumentSendingService {
         };
       });
 
-      // Step 3: Export document to PDF (outside transaction)
+      // Step 3: Export document to PDF or retrieve quote PDF (outside transaction)
       let pdfFile;
       try {
-        // Get documents folder
-        const documentsFolder = await googleIntegration.ensureDocumentsFolder();
+        if (result.document.type === DocumentType.QUOTE) {
+          // For QUOTE documents, download PDF from ERP using selectedQuoteId
+          if (!result.document.selectedQuoteId) {
+            throw new ValidationError(
+              "No quote selected for sending. A quote variant must be selected before sending."
+            );
+          }
 
-        // Generate PDF name
-        const pdfName =
-          `${result.document.type}_${result.project.client.name}_${result.project.name}`.replace(
+          logger.info(
+            {
+              documentId,
+              selectedQuoteId: result.document.selectedQuoteId,
+              correlationId,
+            },
+            "Downloading quote PDF from ERP"
+          );
+
+          // Download PDF from ERP
+          const pdfBuffer = await erpIntegration.getQuotationPDF(
+            result.document.selectedQuoteId
+          );
+
+          // Get documents folder
+          const documentsFolder =
+            await googleIntegration.ensureDocumentsFolder();
+
+          // Upload PDF to Google Drive
+          const pdfName = `QUOTE_${result.project.client.name}_${result.project.name}_${result.document.selectedQuoteId}`.replace(
             /[^a-zA-Z0-9_-]/g,
             "_"
           );
 
-        logger.info(
-          {
-            documentId,
-            googleDocId: result.document.driveFileId,
+          pdfFile = await googleIntegration.uploadFileFromBuffer(
+            pdfBuffer,
             pdfName,
-            folderId: documentsFolder.id,
-            correlationId,
-          },
-          "Starting PDF export"
-        );
+            "application/pdf",
+            documentsFolder.id
+          );
 
-        pdfFile = await googleIntegration.exportDocumentAsPdf(
-          result.document.driveFileId,
-          pdfName,
-          documentsFolder.id
-        );
+          logger.info(
+            {
+              documentId,
+              selectedQuoteId: result.document.selectedQuoteId,
+              pdfFileId: pdfFile.id,
+              pdfName: pdfFile.name,
+              correlationId,
+            },
+            "Quote PDF uploaded to Google Drive"
+          );
+        } else {
+          // For BRAND_ORIGIN documents, export from Google Docs as before
+          const documentsFolder =
+            await googleIntegration.ensureDocumentsFolder();
+
+          const pdfName =
+            `${result.document.type}_${result.project.client.name}_${result.project.name}`.replace(
+              /[^a-zA-Z0-9_-]/g,
+              "_"
+            );
+
+          logger.info(
+            {
+              documentId,
+              googleDocId: result.document.driveFileId,
+              pdfName,
+              folderId: documentsFolder.id,
+              correlationId,
+            },
+            "Starting PDF export from Google Docs"
+          );
+
+          pdfFile = await googleIntegration.exportDocumentAsPdf(
+            result.document.driveFileId,
+            pdfName,
+            documentsFolder.id
+          );
+
+          logger.info(
+            {
+              documentId,
+              pdfFileId: pdfFile.id,
+              pdfName: pdfFile.name,
+              pdfSize: pdfFile.size,
+              correlationId,
+            },
+            "PDF export completed successfully"
+          );
+        }
+
         // Share PDF with client (no notifications)
         await googleIntegration.shareDocument(pdfFile.id, [
           {
@@ -187,33 +251,32 @@ class DocumentSendingService {
           },
           "PDF shared with client"
         );
-
-        logger.info(
-          {
-            documentId,
-            pdfFileId: pdfFile.id,
-            pdfName: pdfFile.name,
-            pdfSize: pdfFile.size,
-            correlationId,
-          },
-          "PDF export completed successfully"
-        );
       } catch (pdfError) {
         logger.error(
           {
             documentId,
+            documentType: result.document.type,
+            selectedQuoteId: result.document.selectedQuoteId,
             googleDocId: result.document.driveFileId,
             error: pdfError.message,
             correlationId,
           },
-          "PDF export failed"
+          "PDF export/download failed"
         );
+
+        const errorType =
+          result.document.type === DocumentType.QUOTE
+            ? "Quote PDF download from ERP failed"
+            : "PDF export from Google Docs failed";
+
         throw new GoogleError(
-          "PDF export failed during document sending",
+          `${errorType} during document sending`,
           pdfError,
           {
             documentId,
+            documentType: result.document.type,
             googleDocId: result.document.driveFileId,
+            selectedQuoteId: result.document.selectedQuoteId,
             correlationId,
           }
         );
@@ -496,12 +559,24 @@ class DocumentSendingService {
         };
       }
 
-      if (!document.driveFileId) {
-        return {
-          valid: false,
-          error: "Document does not have Google Drive file",
-          code: "NO_DRIVE_FILE",
-        };
+      // For QUOTE documents, check if a quote has been selected
+      if (document.type === DocumentType.QUOTE) {
+        if (!document.selectedQuoteId) {
+          return {
+            valid: false,
+            error: "No quote variant selected. Please select a quote before sending to client.",
+            code: "NO_QUOTE_SELECTED",
+          };
+        }
+      } else {
+        // For BRAND_ORIGIN documents, check if Google Drive file exists
+        if (!document.driveFileId) {
+          return {
+            valid: false,
+            error: "Document does not have Google Drive file",
+            code: "NO_DRIVE_FILE",
+          };
+        }
       }
 
       if (
