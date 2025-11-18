@@ -827,6 +827,125 @@ class QuoteService {
       throw error;
     }
   }
+
+  /**
+   * Create invoice from accepted quote
+   * @param {string} quoteId - Quote ID (must be submitted)
+   * @param {Object} project - Project data with client
+   * @returns {Promise<string>} Invoice ID
+   */
+  static async createInvoiceFromQuote(quoteId, project) {
+    try {
+      if (!quoteId || typeof quoteId !== "string") {
+        throw new ValidationError("Quote ID is required and must be a string");
+      }
+
+      if (!project || !project.client) {
+        throw new ValidationError("Project with client data is required");
+      }
+
+      logger.info(
+        {
+          quoteId,
+          projectId: project.id,
+          clientName: project.client.name,
+        },
+        "Creating invoice from quote"
+      );
+
+      // Step 1: Get quote details from ERP
+      const quoteDetails = await erpIntegration.getQuotation(quoteId);
+
+      if (quoteDetails.quotation_canceled) {
+        throw new ValidationError(
+          `Cannot create invoice from cancelled quotation: ${quoteId}`
+        );
+      }
+
+      if (quoteDetails.docstatus !== 1) {
+        throw new ValidationError(
+          `Quote must be submitted (docstatus: 1) before creating invoice. Current docstatus: ${quoteDetails.docstatus}`
+        );
+      }
+
+      if (!quoteDetails.items || !Array.isArray(quoteDetails.items)) {
+        throw new ValidationError(
+          `Quote ${quoteId} has no items or invalid items array`
+        );
+      }
+
+      // Step 2: Ensure customer exists
+      const customerName = await this.ensureCustomerExists(project.client);
+
+      // Step 3: Prepare invoice data
+      const today = new Date().toISOString().split("T")[0];
+      const dueDate = new Date();
+      dueDate.setMonth(dueDate.getMonth() + 1); // 30 days payment terms
+      const dueDateStr = dueDate.toISOString().split("T")[0];
+
+      const invoiceData = {
+        customer: customerName,
+        items: quoteDetails.items.map((item) => ({
+          item_code: item.item_code,
+          qty: item.qty || 1,
+          rate: item.rate,
+          description: item.description || item.item_name || item.item_code,
+        })),
+        posting_date: today,
+        due_date: dueDateStr,
+        update_stock: 0, // No stock update for services
+        taxes_and_charges: quoteDetails.taxes_and_charges || "Nigeria Tax - L",
+      };
+
+      // Step 4: Create invoice via ERP API
+      const invoiceResult = await erpIntegration.createSalesInvoice(
+        quoteId,
+        invoiceData
+      );
+
+      const invoiceId = invoiceResult.invoiceId || invoiceResult.name;
+
+      if (!invoiceId) {
+        throw new Error(
+          "Invoice creation failed - no invoice ID returned from ERP"
+        );
+      }
+
+      logger.info(
+        {
+          quoteId,
+          invoiceId,
+          projectId: project.id,
+          customerName,
+        },
+        "Invoice created successfully from quote"
+      );
+
+      return invoiceId;
+    } catch (error) {
+      logger.error(
+        {
+          quoteId,
+          projectId: project?.id,
+          error: error.message,
+          errorType: error.constructor.name,
+        },
+        "Failed to create invoice from quote"
+      );
+
+      if (
+        error instanceof IntegrationError ||
+        error instanceof ValidationError
+      ) {
+        throw error;
+      }
+
+      throw new IntegrationError("ERP", "createInvoiceFromQuote", error, {
+        quoteId,
+        projectId: project?.id,
+      });
+    }
+  }
 }
 
 module.exports = {

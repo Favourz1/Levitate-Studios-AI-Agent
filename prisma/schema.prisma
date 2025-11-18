@@ -74,6 +74,7 @@ model Document {
   erpQuoteId        String?  @map("erp_quote_id") // Main quote ID from ERP, used for quotes only
   erpVariantIds     Json?    @map("erp_variant_ids") @db.JsonB // JSON array of 3 variant quote IDs
   selectedQuoteId   String?  @map("selected_quote_id") // Which quote ID was sent to client
+  metadataInfo      Json?    @map("metadata_info") @db.JsonB // Additional metadata (e.g., invoiceId)
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

@@ -27,6 +27,8 @@ const { appConfig } = require("@/config");
 const {
   isValidProjectPhaseTransition,
 } = require("@/utils/validation/commonValidation");
+const { QuoteService } = require("@/services/quoteService");
+const { erpIntegration } = require("@/integrations/levitateStudiosErp");
 
 const logger = createLogger("worker:emailIntent");
 const prisma = getPrismaClient();
@@ -824,11 +826,12 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
 
     logger.info(
       {
-        emailId: email.id,
+        emailId: email?.id,
         projectId: project.id,
         documentId: currentDocument?.id,
         documentType: currentDocument?.type,
         correlationId,
+        isManualAccept: !email,
       },
       "Handling ACCEPT intent"
     );
@@ -837,7 +840,7 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
     if (!currentDocument) {
       logger.warn(
         {
-          emailId: email.id,
+          emailId: email?.id,
           projectId: project.id,
           correlationId,
         },
@@ -860,17 +863,21 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
     });
 
     // Create audit log
+    const actor = email
+      ? `CLIENT (${email.from}) - DETECTED INTENT`
+      : "ADMIN (Manual Accept)";
     await prisma.auditLog.create({
       data: {
         projectId: project.id,
-        actor: `CLIENT (${email.from}) - DETECTED INTENT`,
+        actor,
         action: "DOCUMENT_ACCEPTED",
         details: {
-          emailId: email.id,
+          emailId: email?.id || null,
           documentId: currentDocument.id,
           documentType: currentDocument.type,
-          summary: intentResult.summary,
+          summary: intentResult?.summary || "Manual acceptance from Admin UI",
           correlationId,
+          isManualAccept: !email,
         },
         at: new Date(),
       },
@@ -878,13 +885,14 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
 
     logger.info(
       {
-        emailId: email.id,
+        emailId: email?.id,
         projectId: project.id,
         documentId: currentDocument.id,
         documentType: currentDocument.type,
         correlationId,
+        isManualAccept: !email,
       },
-      "Document accepted by client - Next phase workflow should trigger"
+      "Document accepted - Next phase workflow should trigger"
     );
 
     if (currentDocument.type === DocumentType.BRAND_ORIGIN) {
@@ -901,14 +909,22 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
     }
 
     if (currentDocument.type === DocumentType.QUOTE) {
-      logger.info(
-        {
-          projectId: project.id,
-          documentId: currentDocument.id,
-          correlationId,
-        },
-        "Quote acceptance detected - awaiting quote acceptance workflow"
+      await handleQuoteAcceptance(
+        project,
+        currentDocument,
+        email,
+        intentResult,
+        correlationId
       );
+
+      return {
+        actionTaken: true,
+        intent: EmailIntent.ACCEPT,
+        message: "Quote accepted - invoice created and project finalized",
+        documentId: currentDocument.id,
+        documentType: currentDocument.type,
+        documentStatus: DocumentStatus.ACCEPTED,
+      };
     }
 
     return {
@@ -922,7 +938,8 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
   } catch (error) {
     logger.error(
       {
-        emailId: context.email.id,
+        emailId: context.email?.id,
+        projectId: context.project?.id,
         error: error.message,
         correlationId,
       },
@@ -962,6 +979,218 @@ async function handleBrandOriginAcceptance(project, correlationId) {
         error: error.message,
       },
       "Failed to process brand origin acceptance workflow"
+    );
+    throw error;
+  }
+}
+
+/**
+ * Handle quote acceptance - submit quote, create invoice, finalize project
+ * @param {Object} project - Project data from context
+ * @param {Object} document - Document data from context
+ * @param {Object} email - Email data from context
+ * @param {Object} intentResult - Intent detection result
+ * @param {string} correlationId - Correlation ID
+ * @returns {Promise<void>}
+ */
+async function handleQuoteAcceptance(
+  project,
+  document,
+  email,
+  intentResult,
+  correlationId
+) {
+  try {
+    logger.info(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        correlationId,
+      },
+      "Starting quote acceptance workflow"
+    );
+
+    // Get full document with selected quote ID
+    const fullDocument = await prisma.document.findUnique({
+      where: { id: document.id },
+      include: {
+        project: {
+          include: {
+            client: true,
+          },
+        },
+      },
+    });
+
+    if (!fullDocument) {
+      throw new ValidationError(`Document not found: ${document.id}`);
+    }
+
+    if (!fullDocument.selectedQuoteId) {
+      throw new ValidationError(
+        `Quote document ${document.id} has no selected quote ID`
+      );
+    }
+
+    const selectedQuoteId = fullDocument.selectedQuoteId;
+
+    // Step 1: Verify quote is not cancelled before submitting
+    logger.info(
+      {
+        projectId: project.id,
+        selectedQuoteId,
+        correlationId,
+      },
+      "Verifying quote status before submission"
+    );
+
+    const quoteDetails = await erpIntegration.getQuotation(selectedQuoteId);
+    if (quoteDetails.quotation_canceled) {
+      throw new ValidationError(
+        `Cannot submit cancelled quotation: ${selectedQuoteId}. Latest cancelled ID: ${quoteDetails.latest_canceled_id}`
+      );
+    }
+
+    // Step 2: Submit quote (docstatus: 0 → 1)
+    logger.info(
+      {
+        projectId: project.id,
+        selectedQuoteId,
+        correlationId,
+      },
+      "Submitting quote to ERP"
+    );
+
+    await erpIntegration.submitQuotation(selectedQuoteId);
+
+    logger.info(
+      {
+        projectId: project.id,
+        selectedQuoteId,
+        correlationId,
+      },
+      "Quote submitted successfully"
+    );
+
+    // Step 3: Create invoice from quote
+    logger.info(
+      {
+        projectId: project.id,
+        selectedQuoteId,
+        correlationId,
+      },
+      "Creating invoice from quote"
+    );
+
+    const invoiceId = await QuoteService.createInvoiceFromQuote(
+      selectedQuoteId,
+      fullDocument.project
+    );
+
+    logger.info(
+      {
+        projectId: project.id,
+        selectedQuoteId,
+        invoiceId,
+        correlationId,
+      },
+      "Invoice created successfully"
+    );
+
+    // Step 4: Update document with invoice ID in metadataInfo
+    const currentMetadataInfo = fullDocument.metadataInfo || {};
+    await prisma.document.update({
+      where: { id: document.id },
+      data: {
+        metadataInfo: {
+          ...currentMetadataInfo,
+          invoiceId: invoiceId,
+        },
+        updatedAt: new Date(),
+      },
+    });
+
+    // Step 5: Create audit logs
+    await prisma.auditLog.create({
+      data: {
+        projectId: project.id,
+        actor: email
+          ? `CLIENT (${email.from}) - DETECTED INTENT`
+          : "ADMIN (Manual Accept)",
+        action: AuditActions.QUOTE_ACCEPTED,
+        details: {
+          emailId: email?.id || null,
+          documentId: document.id,
+          selectedQuoteId,
+          invoiceId,
+          summary: intentResult?.summary || "Manual acceptance from Admin UI",
+          correlationId,
+          isManualAccept: !email,
+        },
+        at: new Date(),
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        projectId: project.id,
+        actor: SystemActors.QUOTE_GENERATOR,
+        action: AuditActions.INVOICE_CREATED,
+        details: {
+          documentId: document.id,
+          selectedQuoteId,
+          invoiceId,
+          correlationId,
+        },
+        at: new Date(),
+      },
+    });
+
+    // Step 6: Send confirmation email if detected via email intent (not manual)
+    // Note: Manual accepts (from Admin UI) should not send confirmation email
+    // Check if email exists and has an id (from email intent detection)
+    const isEmailIntent = email && typeof email === "object" && email.id;
+    if (isEmailIntent) {
+      await sendQuoteAcceptanceConfirmationEmail(
+        fullDocument.project,
+        fullDocument,
+        invoiceId,
+        correlationId
+      );
+    } else {
+      logger.info(
+        {
+          projectId: project.id,
+          documentId: document.id,
+          correlationId,
+        },
+        "Skipping confirmation email - manual accept from Admin UI"
+      );
+    }
+
+    // Step 7: Finalize project (move to Finalized, enqueue Asana project init)
+    await finalizeProject(project.id, correlationId);
+
+    logger.info(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        selectedQuoteId,
+        invoiceId,
+        correlationId,
+      },
+      "Quote acceptance workflow completed successfully"
+    );
+  } catch (error) {
+    logger.error(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        error: error.message,
+        stack: error.stack,
+        correlationId,
+      },
+      "Failed to process quote acceptance workflow"
     );
     throw error;
   }
@@ -1763,6 +1992,228 @@ async function getIntentMetadataForRegeneration(emailId) {
       "Failed to retrieve intent metadata for regeneration"
     );
     throw error;
+  }
+}
+
+/**
+ * Finalize project - move to Finalized phase and enqueue Asana project initialization
+ * @param {number} projectId - Project ID
+ * @param {string} correlationId - Correlation ID
+ * @returns {Promise<void>}
+ */
+async function finalizeProject(projectId, correlationId) {
+  try {
+    logger.info(
+      {
+        projectId,
+        correlationId,
+      },
+      "Starting project finalization"
+    );
+
+    // Step 1: Move Asana task to "Finalized" section
+    await AsanaPendingProjectsService.moveTaskToSection(
+      projectId,
+      AsanaPendingProjectsBoardSections.FINALIZED,
+      { correlationId }
+    );
+
+    // Step 2: Update project phase to FINALIZED
+    await transitionProjectPhaseIfNeeded(
+      projectId,
+      ProjectPhase.FINALIZED,
+      "Quote accepted by client - project finalized",
+      correlationId
+    );
+
+    // Step 3: Enqueue Asana project initialization job
+    const dedupeKey = `project:${projectId}:asana_init`;
+    await QueueService.addAsanaProjectInitJob({
+      projectId,
+      dedupeKey,
+      correlationId,
+    });
+
+    logger.info(
+      {
+        projectId,
+        dedupeKey,
+        correlationId,
+      },
+      "Project finalization completed - Asana project init queued"
+    );
+  } catch (error) {
+    logger.error(
+      {
+        projectId,
+        error: error.message,
+        stack: error.stack,
+        correlationId,
+      },
+      "Failed to finalize project"
+    );
+    throw error;
+  }
+}
+
+/**
+ * Send quote acceptance confirmation email to Admin & Finance Manager
+ * Only sent if detected via email intent (not manual accept)
+ * @param {Object} project - Project data
+ * @param {Object} document - Document data
+ * @param {string} invoiceId - Invoice ID
+ * @param {string} correlationId - Correlation ID
+ * @returns {Promise<void>}
+ */
+async function sendQuoteAcceptanceConfirmationEmail(
+  project,
+  document,
+  invoiceId,
+  correlationId
+) {
+  try {
+    logger.info(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        invoiceId,
+        correlationId,
+      },
+      "Sending quote acceptance confirmation email"
+    );
+
+    // Get Admin and Finance Manager users
+    const recipients = [];
+
+    // Get Finance Manager - query all active team members and filter by role
+    const allActiveTeamMembers = await prisma.teamMember.findMany({
+      where: {
+        isActive: true,
+      },
+    });
+
+    const financeManager = allActiveTeamMembers.find((member) => {
+      if (!member.roles || !Array.isArray(member.roles)) return false;
+      return member.roles.some(
+        (r) =>
+          r.role === "FINANCE_MANAGER" ||
+          r.role === "Finance Manager" ||
+          r.role === "Finance"
+      );
+    });
+
+    if (financeManager && financeManager.email) {
+      recipients.push({
+        email: financeManager.email,
+        name: financeManager.name,
+        role: "Finance Manager",
+      });
+    }
+
+    // Get Admin
+    if (appConfig.server.adminEmail) {
+      const adminUser = await prisma.teamMember.findFirst({
+        where: {
+          email: appConfig.server.adminEmail,
+          isActive: true,
+        },
+      });
+
+      if (adminUser) {
+        recipients.push({
+          email: adminUser.email,
+          name: adminUser.name,
+          role: "Admin",
+        });
+      } else {
+        // Fallback: add admin email even if not in team members
+        recipients.push({
+          email: appConfig.server.adminEmail,
+          name: "Admin",
+          role: "Admin",
+        });
+      }
+    }
+
+    if (recipients.length === 0) {
+      logger.warn(
+        {
+          projectId: project.id,
+          correlationId,
+        },
+        "No recipients found for quote acceptance confirmation email"
+      );
+      return;
+    }
+
+    // Generate email template
+    const emailTemplate =
+      EmailTemplateService.generateQuoteAcceptanceConfirmationTemplate(
+        project,
+        document,
+        invoiceId
+      );
+
+    // Send email to all recipients
+    for (const recipient of recipients) {
+      try {
+        await brevoIntegration.sendTransactionalEmail({
+          to: [recipient.email],
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            projectId: project.id,
+            invoiceId,
+            correlationId,
+          },
+          "Quote acceptance confirmation email sent successfully"
+        );
+      } catch (emailError) {
+        logger.error(
+          {
+            recipient: recipient.email,
+            role: recipient.role,
+            emailError: emailError.message,
+            projectId: project.id,
+            correlationId,
+          },
+          "Failed to send quote acceptance confirmation email"
+        );
+        // Continue with other recipients even if one fails
+      }
+    }
+
+    // Create audit log for notification
+    await prisma.auditLog.create({
+      data: {
+        projectId: project.id,
+        actor: "SYSTEM (Quote Acceptance)",
+        action: "QUOTE_ACCEPTANCE_CONFIRMATION_SENT",
+        details: {
+          documentId: document.id,
+          invoiceId,
+          recipientsNotified: recipients.map((r) => r.email),
+          correlationId,
+        },
+        at: new Date(),
+      },
+    });
+  } catch (error) {
+    logger.error(
+      {
+        projectId: project.id,
+        documentId: document.id,
+        error: error.message,
+        correlationId,
+      },
+      "Failed to send quote acceptance confirmation email"
+    );
+    // Don't throw - this shouldn't fail the main workflow
   }
 }
 

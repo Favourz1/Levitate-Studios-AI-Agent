@@ -2093,6 +2093,205 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate quote acceptance confirmation email template
+   * Sent to Admin & Finance Manager when quote is accepted via email intent
+   * @param {Object} project - Project data
+   * @param {Object} document - Document data
+   * @param {string} invoiceId - Invoice ID created from quote
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateQuoteAcceptanceConfirmationTemplate(
+    project,
+    document,
+    invoiceId
+  ) {
+    try {
+      const subject = `Quote Accepted: ${project.name} - Invoice Created`;
+
+      const escapeHtml = (text) => {
+        if (!text) return "";
+        return String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      };
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${escapeHtml(subject)}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+              background-color: #f4f4f4;
+            }
+            .container {
+              background-color: #ffffff;
+              border-radius: 8px;
+              padding: 30px;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #28a745;
+            }
+            .header h1 {
+              color: #28a745;
+              margin: 0;
+              font-size: 24px;
+            }
+            .header .icon {
+              font-size: 32px;
+              margin-right: 10px;
+            }
+            .content {
+              margin: 20px 0;
+            }
+            .info-box {
+              background-color: #f8f9fa;
+              border-left: 4px solid #28a745;
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .info-box h3 {
+              margin-top: 0;
+              color: #28a745;
+            }
+            .info-box ul {
+              list-style: none;
+              padding: 0;
+              margin: 10px 0;
+            }
+            .info-box li {
+              padding: 5px 0;
+            }
+            .info-box strong {
+              color: #333;
+            }
+            .success-badge {
+              display: inline-block;
+              background-color: #28a745;
+              color: white;
+              padding: 5px 15px;
+              border-radius: 20px;
+              font-size: 14px;
+              font-weight: bold;
+              margin: 10px 0;
+            }
+            .footer {
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #dee2e6;
+              text-align: center;
+              color: #6c757d;
+              font-size: 12px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1><span class="icon">✅</span>Quote Accepted & Invoice Created</h1>
+              <p>The client has accepted the quote and an invoice has been generated.</p>
+            </div>
+            
+            <div class="content">
+              <div class="info-box">
+                <h3>📋 Project Details</h3>
+                <ul>
+                  <li><strong>Client:</strong> ${escapeHtml(
+                    project.client?.name || "Unknown Client"
+                  )}</li>
+                  <li><strong>Project:</strong> ${escapeHtml(project.name)}</li>
+                  <li><strong>Quote Document ID:</strong> ${escapeHtml(
+                    document.selectedQuoteId || "N/A"
+                  )}</li>
+                  <li><strong>Invoice ID:</strong> <span class="success-badge">${escapeHtml(
+                    invoiceId || "N/A"
+                  )}</span></li>
+                  <li><strong>Accepted At:</strong> ${new Date().toLocaleDateString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }
+                  )}</li>
+                </ul>
+              </div>
+
+              <div class="info-box">
+                <h3>🎯 Next Steps</h3>
+                <ul>
+                  <li>✅ Quote has been submitted to ERP</li>
+                  <li>✅ Invoice has been created and linked to quote</li>
+                  <li>✅ Project has been moved to "Finalized" phase</li>
+                  <li>✅ Asana project initialization has been queued</li>
+                </ul>
+                <p style="margin-top: 15px;"><strong>Note:</strong> The Asana project will be initialized automatically with team members assigned based on project requirements.</p>
+              </div>
+
+              <div class="info-box" style="background-color: #e7f3ff; border-left-color: #007bff;">
+                <h3 style="color: #007bff;">💡 What Happens Next?</h3>
+                <p>The system will automatically:</p>
+                <ol>
+                  <li>Create a new Asana project for this finalized project</li>
+                  <li>Select appropriate team members based on project requirements</li>
+                  <li>Add team members to the Asana project</li>
+                  <li>Generate project description (excluding financials)</li>
+                  <li>Send completion notification to Admin, Manager, and PM</li>
+                </ol>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
+              <p><small>The quote acceptance was detected via email intent analysis.</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated quote acceptance confirmation template",
+        projectId: project.id,
+        documentId: document.id,
+        invoiceId,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate quote acceptance confirmation template",
+        error: error.message,
+        projectId: project?.id,
+        documentId: document?.id,
+        invoiceId,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Sanitize template content to prevent XSS
    * @param {string} content - Content to sanitize
    * @returns {string} Sanitized content
