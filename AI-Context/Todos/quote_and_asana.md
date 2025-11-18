@@ -557,7 +557,7 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
     - Create invoice: `createSalesInvoice(selected_quote_id, invoiceData)`
     - Store invoice ID in document metadata JSON: `{ invoiceId: "INV-xxx" }`
     - If detected via email intent: send confirmation email to Admin & Finance Manager
-    - If manual accept: directly proceed to finalization
+    - If manual accept (API triggered): directly proceed to finalization
     - Create audit log
 
 ### 7.2 Invoice Creation Logic (`src/services/quoteService.js`)
