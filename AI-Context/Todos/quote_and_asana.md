@@ -520,6 +520,7 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
       - Fetch existing items from quote
       - Modify items array based on feedback (replace, add, remove items)
       - Use `updateQuotation()` with complete items array (all items must exist - ensured in step above)
+  - Also watch out in case items need to be removed too based on the feedback.
   - Generate new PDF using updated quote ID
   - Upload to Drive
   - Create new DocumentRevision
