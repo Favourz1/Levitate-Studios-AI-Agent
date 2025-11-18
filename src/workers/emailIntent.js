@@ -19,9 +19,14 @@ const {
   AuditActions,
   DocumentType,
   ActionType,
+  SystemActors,
+  AsanaPendingProjectsBoardSections,
 } = require("@/constants");
 const { QueueService } = require("@/queues");
 const { appConfig } = require("@/config");
+const {
+  isValidProjectPhaseTransition,
+} = require("@/utils/validation/commonValidation");
 
 const logger = createLogger("worker:emailIntent");
 const prisma = getPrismaClient();
@@ -881,15 +886,34 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
       "Document accepted by client - Next phase workflow should trigger"
     );
 
-    // TODO: In future iterations, implement automatic phase progression:
-    // - If Brand Origin accepted → trigger Quote generation
-    // - If Quote accepted → trigger Asana project initialization
-    // For now, requires manual PM confirmation as per Implementation Plan
+    if (currentDocument.type === DocumentType.BRAND_ORIGIN) {
+      await handleBrandOriginAcceptance(project, correlationId);
+
+      return {
+        actionTaken: true,
+        intent: EmailIntent.ACCEPT,
+        message: "Brand origin accepted - quote generation queued",
+        documentId: currentDocument.id,
+        documentType: currentDocument.type,
+        documentStatus: DocumentStatus.ACCEPTED,
+      };
+    }
+
+    if (currentDocument.type === DocumentType.QUOTE) {
+      logger.info(
+        {
+          projectId: project.id,
+          documentId: currentDocument.id,
+          correlationId,
+        },
+        "Quote acceptance detected - awaiting quote acceptance workflow"
+      );
+    }
 
     return {
       actionTaken: true,
       intent: EmailIntent.ACCEPT,
-      message: "Document accepted - awaiting PM confirmation for next phase",
+      message: "Document accepted - workflow pending for this document type",
       documentId: currentDocument.id,
       documentType: currentDocument.type,
       documentStatus: DocumentStatus.ACCEPTED,
@@ -904,6 +928,95 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
       "Failed to handle ACCEPT intent"
     );
     throw error;
+  }
+}
+
+async function handleBrandOriginAcceptance(project, correlationId) {
+  try {
+    const dedupeKey = `project:${project.id}:quote:generate`;
+
+    await QueueService.addQuoteGenerationJob({
+      projectId: project.id,
+      dedupeKey,
+      correlationId,
+    });
+
+    await transitionProjectPhaseIfNeeded(
+      project.id,
+      ProjectPhase.QUOTE_DOCUMENT,
+      "Client accepted brand origin document",
+      correlationId
+    );
+
+    await AsanaPendingProjectsService.moveTaskToSection(
+      project.id,
+      AsanaPendingProjectsBoardSections.QUOTE_DOCUMENT_PHASE,
+      { correlationId }
+    );
+  } catch (error) {
+    logger.error(
+      {
+        projectId: project.id,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to process brand origin acceptance workflow"
+    );
+    throw error;
+  }
+}
+
+async function transitionProjectPhaseIfNeeded(
+  projectId,
+  targetPhase,
+  reason,
+  correlationId
+) {
+  try {
+    await withTransaction(async (tx) => {
+      const project = await tx.project.findUnique({
+        where: { id: projectId },
+        select: { phase: true },
+      });
+
+      if (!project || project.phase === targetPhase) {
+        return;
+      }
+      if (!isValidProjectPhaseTransition(project.phase, targetPhase)) {
+        throw new ValidationError(
+          `Invalid phase transition from ${project.phase} to ${targetPhase}`
+        );
+      }
+
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          phase: targetPhase,
+          updatedAt: new Date(),
+        },
+      });
+
+      await tx.projectPhaseLog.create({
+        data: {
+          projectId,
+          fromPhase: project.phase,
+          toPhase: targetPhase,
+          reason,
+          actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+          at: new Date(),
+        },
+      });
+    });
+  } catch (error) {
+    logger.warn(
+      {
+        projectId,
+        targetPhase,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to update project phase during acceptance workflow"
+    );
   }
 }
 

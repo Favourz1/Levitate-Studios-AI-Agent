@@ -540,6 +540,111 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate quote document notification template for Finance/Admin
+   * @param {Object} project
+   * @param {Object} details
+   * @returns {{subject: string, htmlContent: string}}
+   */
+  static generateQuoteNotificationTemplate(project, details = {}) {
+    try {
+      const subject = `Quote Document Ready: ${project.name}`;
+      const driveFiles = Array.isArray(details.driveFiles)
+        ? details.driveFiles.filter((file) => !!file)
+        : [];
+      const mainDriveFile = driveFiles.find(
+        (file) => file.quoteId === details.mainQuoteId
+      );
+      const variantFiles = driveFiles.filter(
+        (file) => file.quoteId !== details.mainQuoteId
+      );
+
+      const variantList =
+        variantFiles.length === 0
+          ? "<li>No variant quotes were generated for this project.</li>"
+          : variantFiles
+              .map(
+                (file, index) => `
+                <li>
+                  <strong>Variant ${index + 1} (${file.quoteId})</strong><br/>
+                  <a href="${
+                    file.webViewLink || "#"
+                  }" target="_blank" rel="noopener noreferrer">View PDF</a>
+                </li>`
+              )
+              .join("");
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 640px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e1e5e9; border-radius: 12px; }
+            .header { text-align: center; margin-bottom: 24px; }
+            .cta { display: inline-block; padding: 12px 20px; background: #0f62fe; color: #fff; border-radius: 6px; text-decoration: none; font-weight: 600; }
+            .variant-list { background: #f8f9fb; padding: 16px; border-radius: 8px; }
+            ul { padding-left: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h2>Quote Document Ready</h2>
+              <p>A new quote package has been generated for ${
+                project.client?.name || "the client"
+              }.</p>
+            </div>
+
+            <p><strong>Project:</strong> ${project.name}</p>
+            <p><strong>Main Quote ID:</strong> ${
+              details.mainQuoteId || "N/A"
+            }</p>
+            <p><strong>Variant IDs:</strong> ${
+              details.variantQuoteIds?.length
+                ? details.variantQuoteIds.join(", ")
+                : "None"
+            }</p>
+            <p><strong>Total Line Items:</strong> ${
+              details.totalItems || "Not specified"
+            }</p>
+
+            <div style="text-align:center; margin: 24px 0;">
+              <a class="cta" href="${
+                mainDriveFile?.webViewLink || "#"
+              }" target="_blank" rel="noopener noreferrer">
+                View Main Quote PDF
+              </a>
+            </div>
+
+            <div class="variant-list">
+              <h3>Variant Documents</h3>
+              <ul>${variantList}</ul>
+            </div>
+
+            <p>
+              Please review the documents, select the preferred quote variation, and send to the client when ready.
+            </p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate quote notification template",
+        error: error.message,
+        projectId: project?.id,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Generate document acceptance confirmation template
    * @param {Object} document - Document data
    * @param {Object} project - Project data

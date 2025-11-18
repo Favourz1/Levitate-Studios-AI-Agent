@@ -18,14 +18,27 @@ const isValidEmail = (email) => {
  * @param {string} toPhase - Target phase
  * @returns {boolean} True if transition is valid
  */
-const isValidPhaseTransition = (fromPhase, toPhase) => {
+const isValidProjectPhaseTransition = (fromPhase, toPhase) => {
+  if (!fromPhase || !toPhase) {
+    return false;
+  }
+
   const validTransitions = {
-    null: ["QUESTIONNAIRE"],
-    QUESTIONNAIRE: ["BRAND_ORIGIN", "REJECTED"],
-    BRAND_ORIGIN: ["QUOTE_DOCUMENT", "REJECTED"],
-    QUOTE_DOCUMENT: ["FINALIZED", "REJECTED"],
-    FINALIZED: [], // Final state
-    REJECTED: [], // Final state
+    null: [ProjectPhase.QUESTIONNAIRE],
+    [ProjectPhase.QUESTIONNAIRE]: [
+      ProjectPhase.BRAND_ORIGIN,
+      ProjectPhase.REJECTED,
+    ],
+    [ProjectPhase.BRAND_ORIGIN]: [
+      ProjectPhase.QUOTE_DOCUMENT,
+      ProjectPhase.REJECTED,
+    ],
+    [ProjectPhase.QUOTE_DOCUMENT]: [
+      ProjectPhase.FINALIZED,
+      ProjectPhase.REJECTED,
+    ],
+    [ProjectPhase.FINALIZED]: [], // Final state
+    [ProjectPhase.REJECTED]: [], // Final state
   };
 
   return validTransitions[fromPhase]?.includes(toPhase) || false;
@@ -316,7 +329,7 @@ const validateRequiredFields = (obj, requiredFields) => {
 
 module.exports = {
   isValidEmail,
-  isValidPhaseTransition,
+  isValidProjectPhaseTransition,
   isValidUUID,
   sanitizeString,
   isValidUrl,

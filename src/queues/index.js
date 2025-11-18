@@ -24,6 +24,7 @@ const QUEUE_NAMES = {
   EMAIL_INTENT: "email-intent",
   ASANA_SYNC: "asana-sync",
   ASANA_PROJECT_INIT: "asana-project-init",
+  QUOTE_GENERATION: "quote-generation",
   NOTIFICATIONS: "notifications",
   SNAPSHOT_SYNC: "snapshot-sync",
 };
@@ -34,6 +35,9 @@ const queues = {
   emailIntent: new Queue(QUEUE_NAMES.EMAIL_INTENT, { connection: redis }),
   asanaSync: new Queue(QUEUE_NAMES.ASANA_SYNC, { connection: redis }),
   asanaProjectInit: new Queue(QUEUE_NAMES.ASANA_PROJECT_INIT, {
+    connection: redis,
+  }),
+  quoteGeneration: new Queue(QUEUE_NAMES.QUOTE_GENERATION, {
     connection: redis,
   }),
   notifications: new Queue(QUEUE_NAMES.NOTIFICATIONS, { connection: redis }),
@@ -110,6 +114,24 @@ class QueueService {
     };
 
     return queues.asanaSync.add("sync-asana", data, jobOptions);
+  }
+
+  // Quote generation jobs
+  static async addQuoteGenerationJob(data, priority = 0) {
+    const dedupeKey =
+      data.dedupeKey || `project:${data.projectId}:quote:generate`;
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority,
+      jobId: dedupeKey,
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+    };
+
+    return queues.quoteGeneration.add("generate-quote", jobData, jobOptions);
   }
 
   // Asana project initialization jobs

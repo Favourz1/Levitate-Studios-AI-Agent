@@ -717,6 +717,193 @@ class AsanaPendingProjectsService {
   }
 
   /**
+   * Helper function to get Finance Manager user GID (similar to getPMUser)
+   * @param {number} [projectId]
+   * @returns {Promise<Object|null>}
+   */
+  static async getFinanceManager(projectId) {
+    const prisma = getPrismaClient();
+
+    try {
+      if (projectId != null) {
+        const asanaLink = await prisma.asanaLink.findFirst({
+          where: {
+            projectId,
+            financeGid: {
+              not: null,
+            },
+          },
+          select: {
+            financeGid: true,
+          },
+        });
+
+        if (asanaLink?.financeGid) {
+          const financeMember = await prisma.teamMember.findFirst({
+            where: {
+              isActive: true,
+              asanaUserGid: asanaLink.financeGid,
+            },
+          });
+
+          if (financeMember) {
+            return financeMember;
+          }
+        }
+      }
+
+      let financeMember = await prisma.teamMember.findFirst({
+        where: {
+          isActive: true,
+          roles: {
+            array_contains: [
+              {
+                role: TeamRole.FINANCE_MANAGER,
+                isLead: true,
+              },
+            ],
+          },
+        },
+      });
+
+      if (!financeMember) {
+        financeMember = await prisma.teamMember.findFirst({
+          where: {
+            isActive: true,
+            roles: {
+              array_contains: [
+                {
+                  role: TeamRole.FINANCE_MANAGER,
+                },
+              ],
+            },
+          },
+        });
+      }
+
+      if (financeMember && financeMember.asanaUserGid) {
+        return financeMember;
+      }
+
+      logger.warn("No active finance manager found in team members");
+      return null;
+    } catch (error) {
+      logger.error(`Failed to get Finance Manager user: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Move the Pending Projects task for a project to a specified section
+   * @param {number} projectId
+   * @param {string} targetSectionName
+   * @param {Object} options
+   * @param {string} [options.correlationId]
+   * @returns {Promise<Object|null>}
+   */
+  static async moveTaskToSection(projectId, targetSectionName, options = {}) {
+    const prisma = getPrismaClient();
+    const correlationId = options.correlationId;
+
+    try {
+      const pendingBoard = await this.ensureAsanaPendingProjectsBoard();
+
+      if (!pendingBoard?.sections?.[targetSectionName]) {
+        logger.warn(
+          {
+            projectId,
+            targetSectionName,
+            correlationId,
+          },
+          "Target section not found in Pending Projects configuration"
+        );
+        return null;
+      }
+
+      const asanaLink = await prisma.asanaLink.findFirst({
+        where: {
+          projectId,
+          pendingBoardGid: pendingBoard.projectGid,
+        },
+        include: {
+          tasks: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      if (!asanaLink || !asanaLink.tasks || asanaLink.tasks.length === 0) {
+        logger.warn(
+          {
+            projectId,
+            targetSectionName,
+            correlationId,
+          },
+          "No Asana task found for project - cannot move section"
+        );
+        return null;
+      }
+
+      const asanaTask = asanaLink.tasks[0];
+      const sectionGid = pendingBoard.sections[targetSectionName];
+
+      await asanaIntegration.moveTaskToSection(
+        asanaTask.taskGid,
+        pendingBoard.projectGid,
+        sectionGid
+      );
+
+      try {
+        await prisma.asanaTask.update({
+          where: { id: asanaTask.id },
+          data: {
+            sectionName: targetSectionName,
+          },
+        });
+      } catch (updateError) {
+        logger.warn(
+          {
+            projectId,
+            targetSectionName,
+            updateError: updateError.message,
+            correlationId,
+          },
+          "Failed to update Asana task section in database after move"
+        );
+      }
+
+      logger.info(
+        {
+          projectId,
+          targetSectionName,
+          taskGid: asanaTask.taskGid,
+          sectionGid,
+          correlationId,
+        },
+        "Asana task moved to target section successfully"
+      );
+
+      return {
+        taskGid: asanaTask.taskGid,
+        sectionGid,
+        projectGid: pendingBoard.projectGid,
+      };
+    } catch (error) {
+      logger.error(
+        {
+          projectId,
+          targetSectionName,
+          error: error.message,
+          correlationId,
+        },
+        "Failed to move Asana task to target section"
+      );
+      return null;
+    }
+  }
+
+  /**
    * Creates an Asana task in the Pending Projects board and stores relevant records
    * @param {Object} processedData - Form processing result data
    * @param {string} correlationId - Correlation ID for tracking

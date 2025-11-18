@@ -1,7 +1,7 @@
 const { getPrismaClient, withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const {
-  isValidPhaseTransition,
+  isValidProjectPhaseTransition,
 } = require("@/utils/validation/commonValidation");
 const { asanaIntegration } = require("@/integrations/asana");
 const {
@@ -156,7 +156,12 @@ class RejectionConfirmationService {
             );
           } else {
             // Validate phase transition
-            if (!isValidPhaseTransition(project.phase, ProjectPhase.REJECTED)) {
+            if (
+              !isValidProjectPhaseTransition(
+                project.phase,
+                ProjectPhase.REJECTED
+              )
+            ) {
               throw new ValidationError(
                 `Invalid phase transition from ${project.phase} to REJECTED`
               );

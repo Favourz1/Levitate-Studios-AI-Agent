@@ -8,6 +8,7 @@ const { documentGenerationProcessor } = require("@/workers/documentGeneration");
 const { emailIntentProcessor } = require("@/workers/emailIntent");
 const { asanaSyncProcessor } = require("@/workers/asanaSync");
 const { asanaProjectInitProcessor } = require("@/workers/asanaProjectInit");
+const { quoteGenerationProcessor } = require("@/workers/quoteGeneration");
 const { notificationProcessor } = require("@/workers/notifications");
 const { snapshotSyncProcessor } = require("@/workers/snapshotSync");
 
@@ -30,6 +31,11 @@ const startWorkers = async () => {
         name: QUEUE_NAMES.DOC_GENERATION,
         processor: documentGenerationProcessor,
         concurrency: 3, // Limit concurrent document generation
+      },
+      {
+        name: QUEUE_NAMES.QUOTE_GENERATION,
+        processor: quoteGenerationProcessor,
+        concurrency: 4,
       },
       {
         name: QUEUE_NAMES.EMAIL_INTENT,
