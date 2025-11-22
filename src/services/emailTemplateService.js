@@ -365,11 +365,11 @@ class EmailTemplateService {
       } - ${project.name}`;
 
       const reviewUrl = actionTokens.generateLinkToken
-        ? `${appConfig.server.baseUrl}/actions/review?t=${actionTokens.generateLinkToken}`
+        ? `${appConfig.server.baseUrl}/api/v1/actions/review?t=${actionTokens.generateLinkToken}`
         : "#";
 
       const sendToClientUrl = actionTokens.sendToClientToken
-        ? `${appConfig.server.baseUrl}/actions/send-to-client?t=${actionTokens.sendToClientToken}`
+        ? `${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${actionTokens.sendToClientToken}`
         : "#";
 
       const intentResult = feedbackContext.intentResult || {};
