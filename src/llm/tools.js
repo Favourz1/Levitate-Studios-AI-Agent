@@ -83,8 +83,6 @@ const readProjectContextTool = tool({
           id: doc.id,
           type: doc.type,
           status: doc.status,
-          isVariant: doc.isVariant,
-          variantIndex: doc.variantIndex,
           latestRevision: doc.revisions?.[0]
             ? {
                 text: doc.revisions[0].snapshotText,
@@ -150,7 +148,6 @@ const readDocumentSnapshotsTool = tool({
           id: document.id,
           type: document.type,
           status: document.status,
-          isVariant: document.isVariant,
           project: {
             name: document.project.name,
             phase: document.project.phase,
@@ -180,19 +177,9 @@ const writeDocumentTool = tool({
     documentType: z.enum(Object.values(DocumentType)),
     content: z.string().min(1),
     title: z.string().max(200),
-    isVariant: z.boolean().default(false),
-    variantIndex: z.number().int().positive().optional(),
     summary: z.string().max(500).optional(),
   }),
-  execute: async ({
-    projectId,
-    documentType,
-    content,
-    title,
-    isVariant,
-    variantIndex,
-    summary,
-  }) => {
+  execute: async ({ projectId, documentType, content, title, summary }) => {
     try {
       // Create Google Doc
       const googleDoc = await googleIntegration.createDocument(title, content);
@@ -204,8 +191,6 @@ const writeDocumentTool = tool({
           type: documentType,
           status: DocumentStatus.DRAFT,
           driveFileId: googleDoc.id,
-          isVariant,
-          variantIndex,
         },
       });
 
@@ -291,8 +276,6 @@ const createDocumentVariantTool = tool({
               type: DocumentType.QUOTE_VARIANT,
               status: DocumentStatus.DRAFT,
               driveFileId: googleDoc.id,
-              isVariant: true,
-              variantIndex: index + 1,
             },
           });
 
@@ -312,7 +295,6 @@ const createDocumentVariantTool = tool({
 
           return {
             documentId: document.id,
-            variantIndex: index + 1,
             googleDocId: googleDoc.id,
             webViewLink: googleDoc.webViewLink,
             title: variant.title,

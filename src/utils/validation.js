@@ -136,8 +136,6 @@ const createProjectSchema = z.object({
 const createDocumentSchema = z.object({
   projectId: idSchema,
   type: documentTypeSchema,
-  isVariant: z.boolean().default(false),
-  variantIndex: z.number().int().positive().optional(),
 });
 
 const updateDocumentStatusSchema = z.object({
@@ -264,7 +262,6 @@ const documentQuerySchema = z.object({
   projectId: idSchema.optional(),
   type: documentTypeSchema.optional(),
   status: documentStatusSchema.optional(),
-  isVariant: z.coerce.boolean().optional(),
   ...paginationSchema.shape,
 });
 

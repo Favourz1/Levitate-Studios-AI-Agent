@@ -1047,8 +1047,6 @@ async function createDocumentRecords(
           type: DocumentType.BRAND_ORIGIN,
           status: DocumentStatus.DRAFT, // Initially in draft until Google Doc is created
           driveFileId: null, // Will be updated after Google Doc creation
-          isVariant: false,
-          variantIndex: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
