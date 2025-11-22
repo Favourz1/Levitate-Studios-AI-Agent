@@ -109,10 +109,9 @@ class LevitateStudiosErpIntegration {
    * Search for customers by keyword
    * Searches Name, Email, Mobile, or Tax ID
    * @param {string} searchTerm - Search keyword
-   * @param {number} limit - Maximum results (default: 20)
    * @returns {Promise<Array>} Array of customer objects
    */
-  async searchCustomers(searchTerm, limit = 20) {
+  async searchCustomers(searchTerm) {
     const startTime = Date.now();
 
     try {
@@ -120,7 +119,7 @@ class LevitateStudiosErpIntegration {
         async () => {
           const endpoint = `/api/method/levitate_integration.api.search_customers?search_term=${encodeURIComponent(
             searchTerm
-          )}&limit=${limit}`;
+          )}`;
           const response = await this.makeRequest(endpoint);
 
           if (!response.success && response.success !== undefined) {
@@ -155,7 +154,6 @@ class LevitateStudiosErpIntegration {
       );
       throw new IntegrationError("ERP", "searchCustomers", error, {
         searchTerm,
-        limit,
       });
     }
   }
@@ -273,7 +271,7 @@ class LevitateStudiosErpIntegration {
 
     try {
       // Search for customer by exact name
-      const searchResult = await this.searchCustomers(customerName, 10);
+      const searchResult = await this.searchCustomers(customerName);
 
       // Check for exact name match
       const exactMatch = searchResult.customers.find(
@@ -349,10 +347,9 @@ class LevitateStudiosErpIntegration {
    * Search for items by keyword
    * Searches Name, Code, and Description
    * @param {string} searchTerm - Search keyword
-   * @param {number} limit - Maximum results (default: 20)
    * @returns {Promise<Array>} Array of item objects
    */
-  async searchItems(searchTerm, limit = 20) {
+  async searchItems(searchTerm) {
     const startTime = Date.now();
 
     try {
@@ -360,7 +357,7 @@ class LevitateStudiosErpIntegration {
         async () => {
           const endpoint = `/api/method/levitate_integration.api.search_items?search_term=${encodeURIComponent(
             searchTerm
-          )}&limit=${limit}`;
+          )}`;
           const response = await this.makeRequest(endpoint);
 
           if (!response.success && response.success !== undefined) {
@@ -387,7 +384,6 @@ class LevitateStudiosErpIntegration {
       logIntegrationCall(logger, "ERP", "searchItems", false, duration, error);
       throw new IntegrationError("ERP", "searchItems", error, {
         searchTerm,
-        limit,
       });
     }
   }
@@ -505,7 +501,7 @@ class LevitateStudiosErpIntegration {
 
     try {
       // Search for item by exact code or name
-      const searchResult = await this.searchItems(itemCode, 10);
+      const searchResult = await this.searchItems(itemCode);
 
       // Check for exact match on item_code or item_name
       const exactMatch = searchResult.items.find(
