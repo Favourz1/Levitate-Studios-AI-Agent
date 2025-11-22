@@ -791,13 +791,14 @@ const updateQuoteProcessor = async (job) => {
 
     if (
       !updateResult.data ||
-      !Array.isArray(updateResult.data) ||
-      updateResult.data.length === 0
+      !updateResult.data.items ||
+      !Array.isArray(updateResult.data.items) ||
+      updateResult.data.items.length === 0
     ) {
       throw new Error("LLM returned empty or invalid updated quote items");
     }
 
-    const updatedQuoteItems = updateResult.data;
+    const updatedQuoteItems = updateResult.data.items;
     logger.info(
       {
         documentId,

@@ -263,8 +263,9 @@ class QuoteService {
 
       if (
         !result.data ||
-        !Array.isArray(result.data) ||
-        result.data.length === 0
+        !result.data.items ||
+        !Array.isArray(result.data.items) ||
+        result.data.items.length === 0
       ) {
         throw new LLMError(
           "quote-generation",
@@ -280,13 +281,13 @@ class QuoteService {
       logger.info(
         {
           projectId: context.project.id,
-          itemCount: result.data.length,
+          itemCount: result.data.items.length,
           traceId: result.traceId,
         },
         "LLM quote generation completed successfully"
       );
 
-      return result.data;
+      return result.data.items;
     } catch (error) {
       logger.error(
         {
@@ -544,8 +545,9 @@ class QuoteService {
           let variantItems;
           if (
             !variantResult.data ||
-            !Array.isArray(variantResult.data) ||
-            variantResult.data.length === 0
+            !variantResult.data.items ||
+            !Array.isArray(variantResult.data.items) ||
+            variantResult.data.items.length === 0
           ) {
             logger.warn(
               { variantIndex: i },
@@ -554,7 +556,7 @@ class QuoteService {
             // Fallback to base items if variant generation fails
             variantItems = quoteItems;
           } else {
-            variantItems = variantResult.data;
+            variantItems = variantResult.data.items;
           }
 
           // Ensure variant items exist in ERP

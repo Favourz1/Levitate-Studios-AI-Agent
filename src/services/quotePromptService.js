@@ -330,23 +330,26 @@ Generate the complete quote items array now.`;
   /**
    * Generate Zod schema for quote items output
    * @returns {z.ZodSchema} Schema for quote items validation
+   * Note: Must return an object schema (not array) for OpenAI's structured output
    */
   static generateQuoteItemsSchema() {
-    return z.array(
-      z.object({
-        item_code: z
-          .string()
-          .min(1)
-          .max(100)
-          .regex(
-            /^[A-Z0-9_]+$/,
-            "Item code must be uppercase alphanumeric with underscores"
-          ),
-        qty: z.number().positive().int(),
-        rate: z.number().positive(),
-        description: z.string().min(10).max(500),
-      })
-    );
+    return z.object({
+      items: z.array(
+        z.object({
+          item_code: z
+            .string()
+            .min(1)
+            .max(100)
+            .regex(
+              /^[A-Z0-9_]+$/,
+              "Item code must be uppercase alphanumeric with underscores"
+            ),
+          qty: z.number().positive().int(),
+          rate: z.number().positive(),
+          description: z.string().min(10).max(500),
+        })
+      ),
+    });
   }
 
   /**
