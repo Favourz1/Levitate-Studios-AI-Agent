@@ -593,7 +593,7 @@ class EmailTemplateService {
                   appConfig.server.baseUrl
                 }/api/v1/actions/send-to-client?t=${
                       sendToClientTokens[details.mainQuoteId]
-                    }"
+                    }&quoteId=${details.mainQuoteId}"
                    style="display: inline-block; padding: 10px 16px; background: #0f62fe; color: white; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
                   📤 Send to Client
                 </a>
@@ -625,7 +625,7 @@ class EmailTemplateService {
               ${
                 sendToken
                   ? `
-                <a href="${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${sendToken}"
+                <a href="${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${sendToken}&quoteId=${file.quoteId}"
                    style="display: inline-block; padding: 10px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
                   📤 Send to Client
                 </a>
@@ -840,7 +840,7 @@ class EmailTemplateService {
             ${
               sendToClientToken
                 ? `
-              <a href="${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${sendToClientToken}"
+              <a href="${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${sendToClientToken}&quoteId=${quoteId}"
                  style="display: inline-block; padding: 10px 16px; background: #0f62fe; color: white; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
                  📤 Send to Client
               </a>
