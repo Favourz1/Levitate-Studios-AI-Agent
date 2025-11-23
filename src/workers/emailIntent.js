@@ -58,11 +58,14 @@ async function assembleIntentContext(emailId) {
                 documents: {
                   where: {
                     status: {
-                      in: [DocumentStatus.SENT_TO_CLIENT],
+                      in: [
+                        DocumentStatus.SENT_TO_CLIENT,
+                        DocumentStatus.CLIENT_FEEDBACK,
+                      ],
                     },
                   },
                   orderBy: { updatedAt: "desc" },
-                  take: 1,
+                  take: 10, // Get more documents to filter by type
                   include: {
                     currentRevision: true,
                     lastSentRevision: true,
@@ -97,7 +100,85 @@ async function assembleIntentContext(emailId) {
     }
 
     const project = email.thread.project;
-    const currentDocument = project.documents[0] || null;
+
+    // Determine expected document type based on project phase
+    let expectedDocumentType = null;
+    if (project.phase === ProjectPhase.QUOTE_DOCUMENT) {
+      expectedDocumentType = DocumentType.QUOTE;
+    } else if (project.phase === ProjectPhase.BRAND_ORIGIN) {
+      expectedDocumentType = DocumentType.BRAND_ORIGIN;
+    }
+
+    // Filter documents by type if we know the expected type
+    let currentDocument = null;
+    if (expectedDocumentType && project.documents.length > 0) {
+      // Find document matching the expected type
+      currentDocument =
+        project.documents.find(
+          (doc) =>
+            doc.type === expectedDocumentType &&
+            (doc.status === DocumentStatus.SENT_TO_CLIENT ||
+              doc.status === DocumentStatus.CLIENT_FEEDBACK)
+        ) || null;
+    } else {
+      // Fallback: use first document if no type filter needed
+      currentDocument = project.documents[0] || null;
+    }
+
+    // If still no document found, try a more permissive query
+    if (!currentDocument) {
+      logger.warn(
+        {
+          emailId,
+          projectId: project.id,
+          projectPhase: project.phase,
+          expectedDocumentType,
+          foundDocuments: project.documents.length,
+          documentStatuses: project.documents.map((d) => ({
+            id: d.id,
+            type: d.type,
+            status: d.status,
+          })),
+        },
+        "No document found with expected type/status, trying broader query"
+      );
+
+      // Query directly from database with broader criteria
+      const broaderQuery = await prisma.document.findFirst({
+        where: {
+          projectId: project.id,
+          ...(expectedDocumentType && { type: expectedDocumentType }),
+          status: {
+            in: [
+              DocumentStatus.SENT_TO_CLIENT,
+              DocumentStatus.CLIENT_FEEDBACK,
+              DocumentStatus.PM_REVIEW, // Also check PM_REVIEW as fallback for brand origin
+              DocumentStatus.FINANCE_MANAGER_REVIEW, // Also check FINANCE_MANAGER_REVIEW as fallback for quote
+            ],
+          },
+        },
+        orderBy: { updatedAt: "desc" },
+        include: {
+          currentRevision: true,
+          lastSentRevision: true,
+        },
+      });
+
+      if (broaderQuery) {
+        currentDocument = broaderQuery;
+        logger.info(
+          {
+            emailId,
+            projectId: project.id,
+            documentId: currentDocument.id,
+            documentType: currentDocument.type,
+            documentStatus: currentDocument.status,
+          },
+          "Found document with broader query"
+        );
+      }
+    }
+
     const conversationHistory = email.thread.emails || [];
 
     // Get the content that was actually sent to the client

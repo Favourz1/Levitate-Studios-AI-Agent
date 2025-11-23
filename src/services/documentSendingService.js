@@ -573,6 +573,34 @@ class DocumentSendingService {
         };
       }
 
+      // Validate document is in appropriate status for sending
+      const allowedStatusesForSending = {
+        [DocumentType.BRAND_ORIGIN]: [
+          DocumentStatus.PM_REVIEW,
+          DocumentStatus.CLIENT_FEEDBACK, // Allow resending after feedback
+        ],
+        [DocumentType.QUOTE]: [
+          DocumentStatus.FINANCE_MANAGER_REVIEW,
+          DocumentStatus.CLIENT_FEEDBACK, // Allow resending after feedback
+        ],
+      };
+
+      const allowedStatuses = allowedStatusesForSending[document.type] || [];
+      if (
+        allowedStatuses.length > 0 &&
+        !allowedStatuses.includes(document.status)
+      ) {
+        return {
+          valid: false,
+          error: `Document must be in ${allowedStatuses.join(
+            " or "
+          )} status before sending. Current status: ${document.status}`,
+          code: "INVALID_STATUS",
+          currentStatus: document.status,
+          allowedStatuses,
+        };
+      }
+
       // For QUOTE documents, check if a quote has been selected
       if (document.type === DocumentType.QUOTE) {
         if (!document.selectedQuoteId) {

@@ -250,7 +250,7 @@ async function createQuoteDocumentRecords(params, correlationId) {
       data: {
         projectId,
         type: DocumentType.QUOTE,
-        status: DocumentStatus.DRAFT,
+        status: DocumentStatus.FINANCE_MANAGER_REVIEW, // Ready for Finance Manager review now that PDFs are created
         driveFileId: driveFiles.find((file) => file.quoteId === mainQuoteId)
           ?.driveFileId,
         erpQuoteId: mainQuoteId,
@@ -984,6 +984,7 @@ const updateQuoteProcessor = async (job) => {
       const updateData = {
         currentRevisionId: revision.id,
         lastSentRevisionId: revision.id, // Update last sent revision
+        status: DocumentStatus.FINANCE_MANAGER_REVIEW, // Move back to Finance Manager review after update
         updatedAt: new Date(),
       };
 
