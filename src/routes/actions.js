@@ -37,7 +37,6 @@ router.get(
     const actionData = req?.actionData; // From authenticateActionToken middleware
     const correlationId = crypto.randomUUID();
     const quoteId = req.query.quoteId; // Optional quoteId for quote selection
-
     try {
       // Extract and validate action data
       const {
@@ -94,46 +93,16 @@ router.get(
         });
       }
 
-      // Step 2: Validate document status and permissions
-      const validation =
-        await DocumentSendingService.validateDocumentForSending(
-          documentId,
-          projectId
-        );
-
-      if (!validation.valid) {
-        // Handle specific validation errors with appropriate responses
-        if (validation.code === "ALREADY_SENT") {
-          // Mark nonce as used even for already sent documents to prevent replay
-          await ActionService.markActionNonceUsed(nonce, correlationId, {
-            action: "SEND_TO_CLIENT",
-            result: "ALREADY_SENT",
-            documentId,
-            projectId,
-            userId,
-          });
-
-          return sendSuccessResponse(res, {
-            message: "Document already sent to client",
-            alreadySent: true,
-            sentAt: validation.sentAt,
-            correlationId,
-            processingTime: Date.now() - startTime,
-          });
-        }
-
-        throw new ValidationError(validation.error);
-      }
-
-      // Step 3: Validate team member permissions
+      // Step 2: Validate team member permissions
       await ActionService.validateTeamMemberPermissions(userId, [
         TeamRole.PROJECT_MANAGER,
         TeamRole.ADMIN,
         TeamRole.MANAGER,
+        TeamRole.FINANCE_MANAGER,
       ]);
 
-      // Step 4: Handle quote selection for QUOTE documents
-      // If quoteId provided, select it before sending
+      // Step 3: Handle quote selection for QUOTE documents
+      // If quoteId provided, select it BEFORE validation so selectedQuoteId is set
       if (quoteId) {
         const document = await getPrismaClient().document.findUnique({
           where: { id: documentId },
@@ -196,6 +165,38 @@ router.get(
           },
           "Quote selected for sending"
         );
+      }
+
+      // Step 4: Validate document status and permissions
+      // This happens AFTER quote selection so selectedQuoteId is already set
+      const validation =
+        await DocumentSendingService.validateDocumentForSending(
+          documentId,
+          projectId
+        );
+
+      if (!validation.valid) {
+        // Handle specific validation errors with appropriate responses
+        if (validation.code === "ALREADY_SENT") {
+          // Mark nonce as used even for already sent documents to prevent replay
+          await ActionService.markActionNonceUsed(nonce, correlationId, {
+            action: "SEND_TO_CLIENT",
+            result: "ALREADY_SENT",
+            documentId,
+            projectId,
+            userId,
+          });
+
+          return sendSuccessResponse(res, {
+            message: "Document already sent to client",
+            alreadySent: true,
+            sentAt: validation.sentAt,
+            correlationId,
+            processingTime: Date.now() - startTime,
+          });
+        }
+
+        throw new ValidationError(validation.error);
       }
 
       // Step 5: Process the send-to-client action
@@ -676,8 +677,9 @@ router.get(
           EmailTemplateService.generateActionSuccessFeedbackTemplate({
             to: userEmail,
             userName,
-            action: `${isDocumentLevel ? "Document" : "Project"
-              } rejection confirmed successfully`,
+            action: `${
+              isDocumentLevel ? "Document" : "Project"
+            } rejection confirmed successfully`,
             projectName: projectData?.name || `Project ${projectId}`,
             clientName: projectData?.client?.name || "N/A",
             documentType: isDocumentLevel ? "Document" : "Project",
