@@ -949,6 +949,44 @@ const updateQuoteProcessor = async (job) => {
       "Uploaded updated quote PDF to Google Drive"
     );
 
+    // Step 9.5: Share updated PDF with Finance Manager (before creating revision)
+    let financeUser =
+      (await AsanaPendingProjectsService.getFinanceManager(projectId)) || null;
+
+    if (financeUser?.email) {
+      try {
+        await googleIntegration.shareDocument(driveFile.id, [
+          {
+            email: financeUser.email,
+            role: "writer",
+            options: { sendNotification: true },
+          },
+        ]);
+
+        logger.info(
+          {
+            financeEmail: financeUser.email,
+            driveFileId: driveFile.id,
+            quoteId: finalQuoteId,
+            correlationId,
+          },
+          "Shared updated quote PDF with Finance Manager"
+        );
+      } catch (shareError) {
+        logger.warn(
+          {
+            financeEmail: financeUser.email,
+            driveFileId: driveFile.id,
+            quoteId: finalQuoteId,
+            error: shareError.message,
+            correlationId,
+          },
+          "Failed to share updated quote PDF with Finance Manager"
+        );
+        // Don't throw - continue with workflow even if sharing fails
+      }
+    }
+
     // Step 10: Create new document revision and update document
     const updateResult_db = await withTransaction(async (tx) => {
       // Create new revision
@@ -1028,8 +1066,7 @@ const updateQuoteProcessor = async (job) => {
     });
 
     // Step 11: Notify Finance Manager and Admin about quote update
-    const financeUser =
-      (await AsanaPendingProjectsService.getFinanceManager(projectId)) || null;
+    // Note: financeUser was already fetched in Step 9.5 for sharing, reuse it here
 
     // Get Admin user
     let adminUser = null;
