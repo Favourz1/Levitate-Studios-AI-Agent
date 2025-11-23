@@ -520,7 +520,6 @@ async function sendQuoteNotifications(
       to: Array.from(recipients),
       subject: template.subject,
       htmlContent: template.htmlContent,
-      textContent: "",
       senderName: "Levitate Studios AI Agent",
       senderEmail: `noreply@${appConfig.emailDomain}`,
     });
@@ -609,7 +608,6 @@ async function sendQuoteNotifications(
     to: Array.from(recipients),
     subject: template.subject,
     htmlContent: template.htmlContent,
-    textContent: "",
     senderName: "Levitate Studios AI Agent",
     senderEmail: `noreply@${appConfig.emailDomain}`,
   });
@@ -1090,7 +1088,6 @@ const updateQuoteProcessor = async (job) => {
           to: [financeUser.email],
           subject: emailTemplate.subject,
           htmlContent: emailTemplate.htmlContent,
-          textContent: "",
           senderName: "Levitate Studios AI Agent",
           senderEmail: `noreply@${appConfig.emailDomain}`,
         });
