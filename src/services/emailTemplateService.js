@@ -831,7 +831,7 @@ class EmailTemplateService {
               <a href="${driveFile.webViewLink}" 
                  target="_blank" 
                  rel="noopener noreferrer"
-                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px;">
+                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px; margin-right: 14px;">
                  📄 View Updated PDF
               </a>
             `
@@ -841,7 +841,7 @@ class EmailTemplateService {
               sendToClientToken
                 ? `
               <a href="${appConfig.server.baseUrl}/api/v1/actions/send-to-client?t=${sendToClientToken}&quoteId=${quoteId}"
-                 style="display: inline-block; padding: 10px 16px; background: #0f62fe; color: white; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                 style="display: inline-block; padding: 10px 16px; background: #0f62fe; color: white; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px; margin-right: 14px;">
                  📤 Send to Client
               </a>
             `
