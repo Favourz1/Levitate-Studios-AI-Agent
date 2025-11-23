@@ -159,6 +159,7 @@ const quoteGenerationProcessorImpl = async (job) => {
     await shareQuoteDocumentsWithFinance(
       driveFileEntries,
       financeUser,
+      mainDriveFile,
       correlationId
     );
 
@@ -337,6 +338,7 @@ async function createQuoteDocumentRecords(params, correlationId) {
 async function shareQuoteDocumentsWithFinance(
   driveFiles,
   financeUser,
+  mainDriveFile,
   correlationId
 ) {
   if (!driveFiles?.length || !financeUser?.email) {
@@ -357,7 +359,7 @@ async function shareQuoteDocumentsWithFinance(
     logger.info(
       {
         financeEmail: financeUser.email,
-        driveFileId: mainDriveFile.driveFileId,
+        driveFileId: mainDriveFile?.driveFileId,
         correlationId,
       },
       "Shared quote document with Finance Manager"
@@ -366,7 +368,7 @@ async function shareQuoteDocumentsWithFinance(
     logger.warn(
       {
         financeEmail: financeUser.email,
-        driveFileId: mainDriveFile.driveFileId,
+        driveFileId: mainDriveFile?.driveFileId,
         error: error.message,
         correlationId,
       },
