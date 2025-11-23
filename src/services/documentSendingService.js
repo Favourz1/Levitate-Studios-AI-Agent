@@ -169,10 +169,11 @@ class DocumentSendingService {
             await googleIntegration.ensureDocumentsFolder();
 
           // Upload PDF to Google Drive
-          const pdfName = `QUOTE_${result.project.client.name}_${result.project.name}_${result.document.selectedQuoteId}`.replace(
-            /[^a-zA-Z0-9_-]/g,
-            "_"
-          );
+          const pdfName =
+            `QUOTE_${result.project.client.name}_${result.project.name}_${result.document.selectedQuoteId}`.replace(
+              /[^a-zA-Z0-9_-]/g,
+              "_"
+            );
 
           pdfFile = await googleIntegration.uploadFileFromBuffer(
             pdfBuffer,
@@ -357,8 +358,12 @@ class DocumentSendingService {
         });
 
         // Update current revision's snapshot with latest content
+        // Only for BRAND_ORIGIN documents (Google Docs), not QUOTE documents (PDFs)
         try {
-          if (result.document.currentRevisionId) {
+          if (
+            result.document.currentRevisionId &&
+            result.document.type === DocumentType.BRAND_ORIGIN
+          ) {
             const latestContent = await googleIntegration.exportDocumentAsText(
               result.document.driveFileId
             );
@@ -377,6 +382,15 @@ class DocumentSendingService {
                 correlationId,
               },
               "Updated current revision snapshot with latest content"
+            );
+          } else if (result.document.type === DocumentType.QUOTE) {
+            logger.debug(
+              {
+                documentId,
+                documentType: result.document.type,
+                correlationId,
+              },
+              "Skipping text export for QUOTE document (PDF, not Google Doc)"
             );
           }
         } catch (snapshotError) {
@@ -564,7 +578,8 @@ class DocumentSendingService {
         if (!document.selectedQuoteId) {
           return {
             valid: false,
-            error: "No quote variant selected. Please select a quote before sending to client.",
+            error:
+              "No quote variant selected. Please select a quote before sending to client.",
             code: "NO_QUOTE_SELECTED",
           };
         }
