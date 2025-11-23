@@ -583,7 +583,7 @@ class EmailTemplateService {
               <a href="${mainDriveFile.webViewLink || "#"}" 
                  target="_blank" 
                  rel="noopener noreferrer"
-                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px;">
+                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px; margin-right:14px;">
                  View PDF
               </a>
               ${
@@ -619,7 +619,7 @@ class EmailTemplateService {
               <a href="${file.webViewLink || "#"}" 
                  target="_blank" 
                  rel="noopener noreferrer"
-                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px;">
+                 style="display: inline-block; padding: 10px 16px; background: #666; color: white; text-decoration: none; border-radius: 4px; font-size: 14px; margin-right:14px;">
                  View PDF
               </a>
               ${
