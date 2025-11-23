@@ -14,6 +14,7 @@ const {
   CreatedBy,
   AsanaPendingProjectsBoardSections,
   ActionType,
+  TeamRole,
 } = require("@/constants");
 const {
   AsanaPendingProjectsService,
@@ -1025,24 +1026,48 @@ const updateQuoteProcessor = async (job) => {
       };
     });
 
-    // Step 11: Notify Finance Manager about quote update
+    // Step 11: Notify Finance Manager and Admin about quote update
     const financeUser =
       (await AsanaPendingProjectsService.getFinanceManager(projectId)) || null;
 
-    if (financeUser?.email) {
+    // Get Admin user
+    let adminUser = null;
+    if (appConfig.server.adminEmail) {
       try {
-        // Create action token for sending updated quote to client
+        const adminTeamMember = await prisma.teamMember.findUnique({
+          where: { email: appConfig.server.adminEmail },
+          select: { id: true, name: true, email: true },
+        });
+        if (adminTeamMember) {
+          adminUser = adminTeamMember;
+        }
+      } catch (error) {
+        logger.warn(
+          { adminEmail: appConfig.server.adminEmail, error: error.message },
+          "Failed to fetch admin team member"
+        );
+      }
+    }
+
+    // Helper function to send notification email to a user
+    const sendUpdateNotification = async (user, userRole) => {
+      if (!user?.email) {
+        return;
+      }
+
+      try {
+        // Create action token for this specific user
         let sendToClientToken = null;
         try {
-          if (financeUser.id) {
+          if (user.id) {
             const actionTokenResult = await ActionService.createActionToken(
               {
                 action: ActionType.SEND_TO_CLIENT,
                 documentId: documentId,
                 projectId: projectId,
-                userId: financeUser.id,
-                userEmail: financeUser.email,
-                userName: financeUser.name || "Finance Manager",
+                userId: user.id,
+                userEmail: user.email,
+                userName: user.name || userRole,
               },
               "24h" // Token valid for 24 hours
             );
@@ -1052,10 +1077,11 @@ const updateQuoteProcessor = async (job) => {
               {
                 documentId,
                 quoteId: finalQuoteId,
-                userId: financeUser.id,
+                userId: user.id,
+                userRole,
                 correlationId,
               },
-              "Action token created for updated quote"
+              `Action token created for updated quote (${userRole})`
             );
           }
         } catch (tokenError) {
@@ -1063,10 +1089,11 @@ const updateQuoteProcessor = async (job) => {
             {
               documentId,
               quoteId: finalQuoteId,
+              userRole,
               error: tokenError.message,
               correlationId,
             },
-            "Failed to create action token for updated quote - email will be sent without send button"
+            `Failed to create action token for ${userRole} - email will be sent without send button`
           );
         }
 
@@ -1085,7 +1112,7 @@ const updateQuoteProcessor = async (job) => {
           );
 
         await brevoIntegration.sendTransactionalEmail({
-          to: [financeUser.email],
+          to: [user.email],
           subject: emailTemplate.subject,
           htmlContent: emailTemplate.htmlContent,
           senderName: "Levitate Studios AI Agent",
@@ -1094,22 +1121,33 @@ const updateQuoteProcessor = async (job) => {
 
         logger.info(
           {
-            financeEmail: financeUser.email,
+            userEmail: user.email,
+            userRole,
             quoteId: finalQuoteId,
             correlationId,
           },
-          "Quote update notification sent to Finance Manager"
+          `Quote update notification sent to ${userRole}`
         );
       } catch (emailError) {
         logger.warn(
           {
-            financeEmail: financeUser.email,
+            userEmail: user.email,
+            userRole,
             error: emailError.message,
             correlationId,
           },
-          "Failed to send quote update notification email"
+          `Failed to send quote update notification email to ${userRole}`
         );
       }
+    };
+
+    // Send notifications to both Finance Manager and Admin
+    if (financeUser?.email) {
+      await sendUpdateNotification(financeUser, TeamRole.FINANCE_MANAGER);
+    }
+
+    if (adminUser?.email) {
+      await sendUpdateNotification(adminUser, TeamRole.ADMIN);
     }
 
     // Step 12: Add Asana comment
