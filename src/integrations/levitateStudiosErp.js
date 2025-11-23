@@ -21,9 +21,14 @@ class LevitateStudiosErpIntegration {
       throw new Error("ERP API credentials are not configured");
     }
 
+    if (!appConfig.erp?.company) {
+      throw new Error("ERP company is not configured");
+    }
+
     this.baseUrl = appConfig.erp.baseUrl.replace(/\/$/, ""); // Remove trailing slash
     this.apiKey = appConfig.erp.apiKey;
     this.apiSecret = appConfig.erp.apiSecret;
+    this.company = appConfig.erp.company;
 
     // Create authentication token
     this.authToken = `${this.apiKey}:${this.apiSecret}`;
@@ -595,11 +600,12 @@ class LevitateStudiosErpIntegration {
           const body = {
             data: {
               customer: data.customer,
+              company: this.company || "Levitate Creative Studios Limited",
               items: data.items,
               transaction_date: data.transaction_date || undefined,
               valid_till: data.valid_till || undefined,
               order_type: data.order_type || "Sales",
-              taxes_and_charges: data.taxes_and_charges || undefined,
+              taxes_and_charges: data.taxes_and_charges || "Nigeria Tax - L",
             },
           };
 

@@ -41,6 +41,7 @@ const envSchema = Joi.object({
   LEVITATE_ERP_BASE_URL: Joi.string().uri().required(),
   LEVITATE_ERP_API_KEY: Joi.string().required(),
   LEVITATE_ERP_API_SECRET: Joi.string().required(),
+  LEVITATE_ERP_COMPANY: Joi.string().required(),
 
   // LLM
   OPENAI_API_KEY: Joi.string().required(),
@@ -112,6 +113,7 @@ const appConfig = {
       : envVars.LEVITATE_ERP_BASE_URL,
     apiKey: envVars.LEVITATE_ERP_API_KEY,
     apiSecret: envVars.LEVITATE_ERP_API_SECRET,
+    company: envVars.LEVITATE_ERP_COMPANY,
   },
   llm: {
     openaiApiKey: envVars.OPENAI_API_KEY,
