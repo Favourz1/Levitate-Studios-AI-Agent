@@ -184,7 +184,8 @@ const quoteGenerationProcessorImpl = async (job) => {
         totalItems: validatedQuoteItems.length,
       },
       financeUser,
-      correlationId
+      correlationId,
+      documentResult.documentId
     );
 
     const duration = Date.now() - startTime;
@@ -447,7 +448,8 @@ async function sendQuoteNotifications(
   driveFiles,
   quoteSummary,
   financeUser,
-  correlationId
+  correlationId,
+  documentId
 ) {
   const recipients = new Set();
   let financeUserId = null;
@@ -492,11 +494,9 @@ async function sendQuoteNotifications(
   }
 
   // Get the document to use its ID for action tokens
-  const document = await prisma.document.findFirst({
-    where: {
-      projectId: project.id,
-      type: DocumentType.QUOTE,
-    },
+  // Use findUnique with the specific documentId to ensure we get the correct document
+  const document = await prisma.document.findUnique({
+    where: { id: documentId },
     select: { id: true },
   });
 
