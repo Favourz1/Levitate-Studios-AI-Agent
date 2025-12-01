@@ -936,6 +936,60 @@ class AsanaIntegration {
       throw new AsanaError("deleteTask", error, { taskGid });
     }
   }
+
+  // Get tasks assigned to a user across all projects
+  // Supports pagination for large result sets
+  async getTasksForUser(userGid, options = {}) {
+    const startTime = Date.now();
+
+    try {
+      const result = await retry(
+        async () => {
+          return this.handleRateLimit(async () => {
+            const opts = {
+              assignee: userGid,
+              completed_since: options.completed_since || "now", // Default to incomplete tasks
+              opt_fields: options.opt_fields || "gid,completed",
+              limit: options.limit || 100,
+            };
+
+            if (options.offset) {
+              opts.offset = options.offset;
+            }
+
+            const response = await this.tasksApi.getTasks(opts);
+
+            return {
+              data: response.data || [],
+              next_page: response.next_page || null,
+            };
+          });
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(logger, "Asana", "getTasksForUser", true, duration, {
+        userGid,
+        taskCount: result.data.length,
+      });
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "getTasksForUser",
+        false,
+        duration,
+        error,
+        { userGid }
+      );
+      throw new AsanaError("getTasksForUser", error, { userGid });
+    }
+  }
 }
 
 // Create singleton instance
