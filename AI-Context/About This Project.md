@@ -49,7 +49,7 @@ Step 7: If you detect that Quote document accepted by client based on the email 
 
 - You also start cron job for creating project on asana (This signifies the project is kicking of officially as an actual project and has ben secured)
 - The new project board will have columns: "To Do", "In Progress", "In Review", "Completed"
-- We would have team member, their roles, asana id, email etc on db one or more people can be on a role for example Graphics Designer can be two people but one will have status of Lead so that person would be default assigned on project. Only one team member per role can have a lead status. A team member can have different roles like a Graphics Designer and a web developer.
+- We would have team members, their roles, asana id, email etc on db one or more people can be on a role for example Graphics Designer can be two people but one will have status of Lead so that person would be default assigned on project. Only one team member per role can have a lead status. A team member can have different roles like a Graphics Designer and a web developer.
   This are the roles we know of now but subject to change/modification in the future:
 - Admin (should not be assigned task)
 - Manager (should not be assigned task)

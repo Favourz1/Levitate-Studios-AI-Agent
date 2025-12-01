@@ -734,7 +734,6 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 
 ### 11.1 Code Documentation
 
-- [ ] Add JSDoc comments to all new functions
 - [ ] Document ERP API integration patterns
 - [ ] Document quote generation workflow
 - [ ] Document team member selection algorithm
@@ -747,6 +746,7 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 
 ### 11.3 Cleanup
 
+- [ ] Add JSDoc comments to all new functions
 - [ ] Remove any unused code
 - [ ] Remove TODO comments that are completed
 - [ ] Clean up console.logs
