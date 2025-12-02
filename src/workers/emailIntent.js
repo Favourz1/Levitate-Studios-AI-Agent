@@ -506,7 +506,14 @@ async function detectEmailIntent(context) {
       },
       "classification"
     );
-    console.log("intentResult", intentResult);
+
+    logger.debug(
+      {
+        emailId: context.email.id,
+        intentResult,
+      },
+      "Intent detection result received"
+    );
 
     logger.debug(
       {

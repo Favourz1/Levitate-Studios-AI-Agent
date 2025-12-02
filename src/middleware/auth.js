@@ -139,8 +139,13 @@ const authenticateActionToken = (req, res, next) => {
 
     next();
   } catch (error) {
-    console.log("error from authenticateActionToken");
-    console.log(error);
+    logger.warn(
+      {
+        error: error.message,
+        stack: error.stack,
+      },
+      "Action token authentication failed"
+    );
     logger.warn(
       { token: token.substring(0, 10) + "...", stack: error.stack },
       "Invalid action token"

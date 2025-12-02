@@ -367,7 +367,6 @@ class DocumentSendingService {
             const latestContent = await googleIntegration.exportDocumentAsText(
               result.document.driveFileId
             );
-            console.log("latestContent", latestContent);
             await tx.documentRevision.update({
               where: { id: result.document.currentRevisionId },
               data: {

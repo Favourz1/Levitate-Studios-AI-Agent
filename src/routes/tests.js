@@ -6,6 +6,9 @@ const {
   asyncHandler,
   sendSuccessResponse,
 } = require("@/middleware/errorHandler");
+const { createLogger } = require("@/utils/logger");
+
+const logger = createLogger("routes:tests");
 
 const router = Router();
 
@@ -17,8 +20,15 @@ router.get(
       const results = await googleIntegration.testAPIConnectivity();
 
       const allSuccessful = results.driveAPI.success && results.docsAPI.success;
-      console.log("results");
-      console.log(results);
+
+      // Log results for debugging
+      logger.debug(
+        {
+          driveAPI: results.driveAPI.success,
+          docsAPI: results.docsAPI.success,
+        },
+        "Google API connectivity test results"
+      );
 
       if (allSuccessful) {
         sendSuccessResponse(res, {

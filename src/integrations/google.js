@@ -380,8 +380,6 @@ class GoogleIntegration {
 
       return result;
     } catch (error) {
-      console.log("Google createDocument error");
-      console.log(error);
       const duration = Date.now() - startTime;
       logIntegrationCall(
         logger,
@@ -2484,13 +2482,16 @@ class GoogleIntegration {
         },
         "Google Docs API test failed"
       );
-      console.log(error);
-      console.log("error?.errors");
-      console.log(error?.errors);
-      console.log("error?.response?.data?.error");
-      console.log(error?.response?.data?.error);
-      console.log("error?.response?.config?.data");
-      console.log(error?.response?.config?.data);
+      logger.error(
+        {
+          error: error.message,
+          errors: error?.errors,
+          responseError: error?.response?.data?.error,
+          requestData: error?.response?.config?.data,
+          stack: error.stack,
+        },
+        "Google API error details"
+      );
     }
 
     return results;

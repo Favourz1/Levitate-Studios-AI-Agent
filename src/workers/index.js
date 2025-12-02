@@ -113,8 +113,13 @@ const startWorkers = async () => {
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   } catch (error) {
-    logger.error("Failed to start workers:", error);
-    console.log(error);
+    logger.error(
+      {
+        error: error.message,
+        stack: error.stack,
+      },
+      "Failed to start workers"
+    );
     process.exit(1);
   }
 };
@@ -136,8 +141,13 @@ const stopWorkers = async () => {
 // Start workers if this file is executed directly
 if (require.main === module) {
   startWorkers().catch((error) => {
-    logger.error("Failed to start workers:", error);
-    console.log(error);
+    logger.error(
+      {
+        error: error.message,
+        stack: error.stack,
+      },
+      "Failed to start workers"
+    );
     process.exit(1);
   });
 }

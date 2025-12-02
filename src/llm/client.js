@@ -102,7 +102,16 @@ class LLMClient {
           // output: "no-schema",
           temperature: taskType === "generation" ? 0.7 : 0.1,
         });
-        console.log("result generateObject", result?.object);
+
+        logger.debug(
+          {
+            traceId,
+            provider,
+            model,
+            hasResult: !!result?.object,
+          },
+          "LLM generateObject result received"
+        );
 
         const duration = Date.now() - startTime;
 
@@ -164,7 +173,16 @@ class LLMClient {
             // output: "no-schema",
             temperature: taskType === "generation" ? 0.7 : 0.1,
           });
-          console.log("fallbackResult generateObject", fallbackResult?.object);
+
+          logger.debug(
+            {
+              traceId,
+              provider,
+              fallbackModel,
+              hasResult: !!fallbackResult?.object,
+            },
+            "LLM fallback generateObject result received"
+          );
 
           const duration = Date.now() - startTime;
 
