@@ -746,9 +746,9 @@ Based on codebase analysis, the following are **CONFIRMED COMPLETE**:
 
 ### 11.3 Cleanup
 
-- [ ] Add JSDoc comments to all new functions
+- [ ] Add JSDoc comments to complex functions
 - [ ] Remove any unused code
-- [ ] Remove TODO comments that are completed
+- [ ] Remove TODO comments that are completed (DO NOT REMOVE THE ONE NOT YET DONE)
 - [ ] Clean up console.logs
 - [ ] Verify all error handling is in place
 
