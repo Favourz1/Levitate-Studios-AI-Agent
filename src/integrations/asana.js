@@ -346,6 +346,16 @@ class AsanaIntegration {
         throw new Error("memberGids is required and must be a non-empty array");
       }
 
+      // Validate each memberGid is a string
+      const invalidGids = memberGids.filter(
+        (gid) => !gid || typeof gid !== "string" || gid.trim().length === 0
+      );
+      if (invalidGids.length > 0) {
+        throw new Error(
+          `Invalid memberGids found: ${invalidGids.length} invalid entries. All memberGids must be non-empty strings.`
+        );
+      }
+
       const result = await retry(
         async () => {
           return this.handleRateLimit(async () => {
