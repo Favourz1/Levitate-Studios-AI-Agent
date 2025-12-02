@@ -124,6 +124,79 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate project initialization completion notification template
+   * For Admin, Manager (if any), and PM
+   * @param {Object} project - Project data with asanaProjectGid
+   * @param {string} asanaProjectUrl - Asana project URL
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateProjectInitializationCompleteTemplate(
+    project,
+    asanaProjectUrl
+  ) {
+    try {
+      const subject = `Project Initialized: ${project.name}`;
+      const asanaLink = asanaProjectUrl
+        ? `<p><a href="${asanaProjectUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Asana Project →</a></p>`
+        : "";
+
+      const htmlContent = `
+        <h2>Project Initialized Successfully</h2>
+        
+        <h3>Project Details</h3>
+        <ul>
+          <li><strong>Project:</strong> ${project.name}</li>
+          <li><strong>Client:</strong> ${project.client?.name || "N/A"}</li>
+          <li><strong>Phase:</strong> ${project.phase || "N/A"}</li>
+          <li><strong>Initialized:</strong> ${new Date().toLocaleDateString(
+            "en-NG",
+            {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }
+          )}</li>
+        </ul>
+        
+        <h3>What's Been Done</h3>
+        <ul>
+          <li>Asana project created with board layout</li>
+          <li>Sections created: "To Do", "In Progress", "In Review", "Completed"</li>
+          <li>Team members selected and added to the project</li>
+          <li>Project description generated and added</li>
+        </ul>
+        
+        <h3>Next Steps</h3>
+        <p>The project is now ready for task assignment. Team members have been added to the Asana project and can start working on tasks.</p>
+        
+        ${asanaLink}
+        
+        <p><strong>Note:</strong> No tasks have been created or assigned yet. You can now proceed with task creation and assignment as needed.</p>
+        
+        <hr>
+        <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
+      `;
+
+      logger.debug({
+        message: "Generated project initialization complete template",
+        projectId: project.id,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate project initialization complete template",
+        error: error.message,
+        projectId: project?.id,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Generate document review notification template
    * @param {Object} document - Document data
    * @param {Object} project - Project data

@@ -265,6 +265,188 @@ class AsanaIntegration {
     }
   }
 
+  // Update project description/notes
+  async updateProjectDescription(projectGid, description) {
+    const startTime = Date.now();
+
+    try {
+      if (!projectGid || typeof projectGid !== "string") {
+        throw new Error("projectGid is required and must be a string");
+      }
+
+      if (description === undefined || description === null) {
+        throw new Error("description is required");
+      }
+
+      const result = await retry(
+        async () => {
+          return this.handleRateLimit(async () => {
+            const requestBody = {
+              data: {
+                notes: description || "",
+              },
+            };
+
+            const opts = {};
+            const response = await this.projectsApi.updateProject(
+              requestBody,
+              projectGid,
+              opts
+            );
+            const project = response.data;
+
+            return {
+              gid: project.gid,
+              name: project.name,
+              notes: project.notes || "",
+            };
+          });
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "updateProjectDescription",
+        true,
+        duration
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "updateProjectDescription",
+        false,
+        duration,
+        error
+      );
+      throw new AsanaError("updateProjectDescription", error, {
+        projectGid,
+        descriptionLength: description?.length || 0,
+      });
+    }
+  }
+
+  // Add members to a project
+  async addMembersToProject(projectGid, memberGids) {
+    const startTime = Date.now();
+
+    try {
+      if (!projectGid || typeof projectGid !== "string") {
+        throw new Error("projectGid is required and must be a string");
+      }
+
+      if (!Array.isArray(memberGids) || memberGids.length === 0) {
+        throw new Error("memberGids is required and must be a non-empty array");
+      }
+
+      const result = await retry(
+        async () => {
+          return this.handleRateLimit(async () => {
+            // Add members one by one (Asana API doesn't support batch add)
+            const results = [];
+            for (const memberGid of memberGids) {
+              try {
+                const requestBody = {
+                  data: {
+                    user: memberGid,
+                  },
+                };
+
+                const opts = {};
+                await this.projectsApi.addUserForProject(
+                  requestBody,
+                  projectGid,
+                  opts
+                );
+
+                results.push({
+                  gid: memberGid,
+                  success: true,
+                });
+              } catch (memberError) {
+                // If member is already in project, that's okay - continue
+                if (
+                  memberError.status === 400 &&
+                  memberError.message?.includes("already")
+                ) {
+                  logger.debug(
+                    { projectGid, memberGid },
+                    "Member already in project, skipping"
+                  );
+                  results.push({
+                    gid: memberGid,
+                    success: true,
+                    alreadyMember: true,
+                  });
+                } else {
+                  logger.warn(
+                    {
+                      projectGid,
+                      memberGid,
+                      error: memberError.message,
+                    },
+                    "Failed to add member to project"
+                  );
+                  results.push({
+                    gid: memberGid,
+                    success: false,
+                    error: memberError.message,
+                  });
+                }
+              }
+            }
+
+            return {
+              projectGid,
+              membersAdded: results.filter((r) => r.success).length,
+              totalMembers: memberGids.length,
+              results,
+            };
+          });
+        },
+        3,
+        1000
+      );
+
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "addMembersToProject",
+        true,
+        duration,
+        {
+          projectGid,
+          membersCount: memberGids.length,
+          successCount: result.membersAdded,
+        }
+      );
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logIntegrationCall(
+        logger,
+        "Asana",
+        "addMembersToProject",
+        false,
+        duration,
+        error
+      );
+      throw new AsanaError("addMembersToProject", error, {
+        projectGid,
+        memberCount: memberGids?.length || 0,
+      });
+    }
+  }
+
   // Create sections in a project
   async createSection(projectGid, name) {
     const startTime = Date.now();

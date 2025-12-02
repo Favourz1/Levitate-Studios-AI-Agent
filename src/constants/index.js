@@ -111,6 +111,14 @@ const AsanaPendingProjectsBoardSections = {
   REJECTED: "Rejected",
 };
 
+// Asana Section Names for Actual Project Boards
+const AsanaProjectBoardSections = {
+  TO_DO: "To Do",
+  IN_PROGRESS: "In Progress",
+  IN_REVIEW: "In Review",
+  COMPLETED: "Completed",
+};
+
 // Processing Status for questionnaire responses and other entities
 const ProcessingStatus = {
   PENDING: "PENDING",
@@ -150,6 +158,7 @@ const AuditActions = {
   DOCUMENT_REJECTED: "DOCUMENT_REJECTED",
   PROJECT_REJECTED: "PROJECT_REJECTED",
   REJECTION_CONFIRMED: "REJECTION_CONFIRMED",
+  ASANA_PROJECT_INITIALIZED: "ASANA_PROJECT_INITIALIZED",
 };
 
 // System Email Addresses
@@ -171,6 +180,7 @@ module.exports = {
   BrandAssets,
   ActionType,
   AsanaPendingProjectsBoardSections,
+  AsanaProjectBoardSections,
   ProcessingStatus,
   SystemProjects,
   SystemActors,
