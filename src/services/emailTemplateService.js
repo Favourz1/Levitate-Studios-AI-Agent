@@ -128,17 +128,59 @@ class EmailTemplateService {
    * For Admin, Manager (if any), and PM
    * @param {Object} project - Project data with asanaProjectGid
    * @param {string} asanaProjectUrl - Asana project URL
+   * @param {Array} projectDocuments - Array of project documents with Drive links (optional)
+   * @param {boolean} includeFinancials - Whether to include financial information (quote links) (default: true)
    * @returns {Object} Email template with subject and htmlContent
    */
   static generateProjectInitializationCompleteTemplate(
     project,
-    asanaProjectUrl
+    asanaProjectUrl,
+    projectDocuments = [],
+    includeFinancials = true
   ) {
     try {
       const subject = `Project Initialized: ${project.name}`;
       const asanaLink = asanaProjectUrl
         ? `<p><a href="${asanaProjectUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Asana Project →</a></p>`
         : "";
+
+      // Filter documents based on includeFinancials flag
+      const documentsToShow = includeFinancials
+        ? projectDocuments
+        : projectDocuments.filter(
+            (doc) =>
+              doc.type !== DocumentType.QUOTE &&
+              doc.type !== DocumentType.QUOTE_VARIANT
+          );
+
+      // Generate document links section
+      let documentLinksHtml = "";
+      if (documentsToShow && documentsToShow.length > 0) {
+        const documentItems = documentsToShow
+          .map((doc) => {
+            const docTypeName =
+              doc.type === DocumentType.BRAND_ORIGIN
+                ? "Brand Origin Document"
+                : doc.type === DocumentType.QUOTE
+                ? "Quote Document"
+                : doc.type === DocumentType.QUOTE_VARIANT
+                ? "Quote Variant"
+                : "Document";
+
+            if (doc.driveLink) {
+              return `<li><strong>${docTypeName}:</strong> <a href="${doc.driveLink}" target="_blank" style="color: #007bff; text-decoration: none;">View Document</a></li>`;
+            }
+            return `<li><strong>${docTypeName}:</strong> Available (link not available)</li>`;
+          })
+          .join("");
+
+        documentLinksHtml = `
+          <h3>📄 Project Documents</h3>
+          <ul>
+            ${documentItems}
+          </ul>
+        `;
+      }
 
       const htmlContent = `
         <h2>Project Initialized Successfully</h2>
@@ -166,6 +208,8 @@ class EmailTemplateService {
           <li>Project description generated and added</li>
         </ul>
         
+        ${documentLinksHtml}
+        
         <h3>Next Steps</h3>
         <p>The project is now ready for task assignment. Team members have been added to the Asana project and can start working on tasks.</p>
         
@@ -180,6 +224,8 @@ class EmailTemplateService {
       logger.debug({
         message: "Generated project initialization complete template",
         projectId: project.id,
+        includeFinancials,
+        documentsCount: documentsToShow.length,
       });
 
       return {

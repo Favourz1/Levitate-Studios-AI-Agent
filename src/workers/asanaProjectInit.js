@@ -8,12 +8,15 @@ const {
 const { AsanaProjectService } = require("@/services/asanaProjectService");
 const { EmailTemplateService } = require("@/services/emailTemplateService");
 const { brevoIntegration } = require("@/integrations/brevo");
+const { googleIntegration } = require("@/integrations/google");
 const { appConfig } = require("@/config");
 const {
   AuditActions,
   SystemActors,
   TeamRole,
   AsanaProjectBoardSections,
+  DocumentType,
+  DocumentStatus,
 } = require("@/constants");
 const {
   AsanaPendingProjectsService,
@@ -47,6 +50,25 @@ const asanaProjectInitProcessor = async (job) => {
       include: {
         client: true,
         documents: {
+          where: {
+            driveFileId: {
+              not: null,
+            },
+            // Only get accepted brand origin and accepted quote with selectedQuoteId
+            OR: [
+              {
+                type: DocumentType.BRAND_ORIGIN,
+                status: DocumentStatus.ACCEPTED,
+              },
+              {
+                type: DocumentType.QUOTE,
+                status: DocumentStatus.ACCEPTED,
+                selectedQuoteId: {
+                  not: null,
+                },
+              },
+            ],
+          },
           orderBy: { updatedAt: "desc" },
         },
       },
@@ -549,40 +571,140 @@ async function sendCompletionEmail(project, asanaProjectGid, correlationId) {
       return;
     }
 
-    // Generate email template
-    const emailTemplate =
-      EmailTemplateService.generateProjectInitializationCompleteTemplate(
-        project,
-        asanaProjectUrl
-      );
+    // Fetch Google Drive links for project documents
+    // Only include accepted brand origin and selected accepted quote
+    const projectDocuments = [];
+    if (project.documents && project.documents.length > 0) {
+      for (const doc of project.documents) {
+        // Double-check: only process accepted brand origin or accepted quote with selectedQuoteId
+        const isAcceptedBrandOrigin =
+          doc.type === DocumentType.BRAND_ORIGIN &&
+          doc.status === DocumentStatus.ACCEPTED;
+        const isSelectedAcceptedQuote =
+          doc.type === DocumentType.QUOTE &&
+          doc.status === DocumentStatus.ACCEPTED &&
+          doc.selectedQuoteId !== null;
 
-    // Send email to all recipients
-    try {
-      await brevoIntegration.sendTransactionalEmail({
-        to: recipients.map((r) => r.email),
-        subject: emailTemplate.subject,
-        htmlContent: emailTemplate.htmlContent,
-      });
+        if (
+          (isAcceptedBrandOrigin || isSelectedAcceptedQuote) &&
+          doc.driveFileId
+        ) {
+          try {
+            const fileMetadata = await googleIntegration.getDocumentMetadata(
+              doc.driveFileId
+            );
+            if (fileMetadata?.webViewLink) {
+              projectDocuments.push({
+                type: doc.type,
+                status: doc.status,
+                driveLink: fileMetadata.webViewLink,
+              });
+            }
+          } catch (driveError) {
+            logger.warn(
+              {
+                projectId: project.id,
+                documentId: doc.id,
+                driveFileId: doc.driveFileId,
+                error: driveError.message,
+                correlationId,
+              },
+              "Failed to get Drive link for document"
+            );
+            // Continue with other documents even if one fails
+          }
+        }
+      }
+    }
 
-      logger.info(
-        {
-          recipients: recipients.map((r) => r.email),
-          projectId: project.id,
-          correlationId,
-        },
-        "Project initialization completion email sent successfully"
-      );
-    } catch (emailError) {
-      logger.error(
-        {
-          recipients: recipients.map((r) => r.email),
-          emailError: emailError.message,
-          projectId: project.id,
-          correlationId,
-        },
-        "Failed to send project initialization completion email"
-      );
-      // Don't throw - this shouldn't fail the main workflow
+    // Send separate emails based on recipient role
+    // PM gets email without financials, Admin/Manager get email with financials
+
+    const adminManagerRecipients = recipients.filter(
+      (r) => r.role === TeamRole.ADMIN || r.role === TeamRole.MANAGER
+    );
+    const pmRecipients = recipients.filter(
+      (r) => r.role === TeamRole.PROJECT_MANAGER
+    );
+
+    // Send emails to Admin/Manager (with financials)
+    if (adminManagerRecipients.length > 0) {
+      try {
+        const emailTemplate =
+          EmailTemplateService.generateProjectInitializationCompleteTemplate(
+            project,
+            asanaProjectUrl,
+            projectDocuments,
+            true // includeFinancials = true
+          );
+
+        await brevoIntegration.sendTransactionalEmail({
+          to: adminManagerRecipients.map((r) => r.email),
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            recipients: adminManagerRecipients.map((r) => r.email),
+            includeFinancials: true,
+            projectId: project.id,
+            correlationId,
+          },
+          "Project initialization completion email sent to Admin/Manager"
+        );
+      } catch (emailError) {
+        logger.error(
+          {
+            recipients: adminManagerRecipients.map((r) => r.email),
+            emailError: emailError.message,
+            projectId: project.id,
+            correlationId,
+          },
+          "Failed to send project initialization completion email to Admin/Manager"
+        );
+        // Don't throw - this shouldn't fail the main workflow
+      }
+    }
+
+    // Send email to PM (without financials)
+    if (pmRecipients.length > 0) {
+      try {
+        const emailTemplate =
+          EmailTemplateService.generateProjectInitializationCompleteTemplate(
+            project,
+            asanaProjectUrl,
+            projectDocuments,
+            false // includeFinancials = false
+          );
+
+        await brevoIntegration.sendTransactionalEmail({
+          to: pmRecipients.map((r) => r.email),
+          subject: emailTemplate.subject,
+          htmlContent: emailTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            recipients: pmRecipients.map((r) => r.email),
+            includeFinancials: false,
+            projectId: project.id,
+            correlationId,
+          },
+          "Project initialization completion email sent to PM (without financials)"
+        );
+      } catch (emailError) {
+        logger.error(
+          {
+            recipients: pmRecipients.map((r) => r.email),
+            emailError: emailError.message,
+            projectId: project.id,
+            correlationId,
+          },
+          "Failed to send project initialization completion email to PM"
+        );
+        // Don't throw - this shouldn't fail the main workflow
+      }
     }
 
     // Create audit log for email notification
@@ -593,6 +715,15 @@ async function sendCompletionEmail(project, asanaProjectGid, correlationId) {
         action: "PROJECT_INIT_COMPLETION_EMAIL_SENT",
         details: {
           recipientsNotified: recipients.map((r) => r.email),
+          adminManagerRecipients: adminManagerRecipients.map((r) => ({
+            email: r.email,
+            includeFinancials: true,
+          })),
+          pmRecipients: pmRecipients.map((r) => ({
+            email: r.email,
+            includeFinancials: false,
+          })),
+          documentsCount: projectDocuments.length,
           correlationId,
         },
         at: new Date(),
