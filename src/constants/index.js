@@ -11,6 +11,7 @@ const DocumentType = {
   BRAND_ORIGIN: "BRAND_ORIGIN",
   QUOTE: "QUOTE",
   QUOTE_VARIANT: "QUOTE_VARIANT",
+  WORKPLAN: "WORKPLAN",
 };
 
 const DocumentStatus = {

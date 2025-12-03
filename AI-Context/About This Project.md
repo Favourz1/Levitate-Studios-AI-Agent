@@ -67,7 +67,7 @@ Step 7: If you detect that Quote document accepted by client based on the email 
 - You will add the selected team members to the project on Asana but you will not assign anyone tasks yet.
 - You will also add a project description in the project description in Asana about everything we know about the project to help teams - excluding financials. This should include all context about the client, project requirements, brand guidelines, conversations, and any other relevant information that would help the team understand the project better.
 
-Step 8: (More details would be shared later on what would happen after Asana project initialization)
+Step 8: This is where we will generate workplan and add it as a task to the project on Asana, Then assign creative director in the project to the task or if no creative director in project in Asana we assign it to the Lead creative director from the tem members list.
 
 Step 9: After step 7 complete send email to Admin and Manager (if anyone on that role) and PM of the project via email, letting them know project has been initialized and team members have been added to the Asana project.
 
