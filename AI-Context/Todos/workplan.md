@@ -644,6 +644,15 @@
 * **API Explorer:** You can try out the API endpoints directly with your credentials using the API Explorer: [https://api.thenounproject.com/explorer](https://api.thenounproject.com/explorer)
 
 The API is a **REST API** secured with **OAuth 1.0a**.
+We need api key and secret key from env see sample code in python
+import requests
+from requests_oauthlib import OAuth1
+
+auth = OAuth1("your-api-key", "your-api-secret")
+endpoint = "https://api.thenounproject.com/v2/icon/1"
+
+response = requests.get(endpoint, auth=auth)
+print(response.content)
 
 ### Key API Information
 
