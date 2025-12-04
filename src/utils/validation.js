@@ -3,6 +3,9 @@ const {
   ProjectPhase,
   DocumentType,
   DocumentStatus,
+  WorkplanServiceType,
+  SlideType,
+  ResearchStatus,
   EmailDirection,
   EmailIntent,
   Actor,
@@ -26,15 +29,22 @@ const documentTypeSchema = z.enum([
   DocumentType.BRAND_ORIGIN,
   DocumentType.QUOTE,
   DocumentType.QUOTE_VARIANT,
+  DocumentType.WORKPLAN,
 ]);
 
 const documentStatusSchema = z.enum([
   DocumentStatus.DRAFT,
   DocumentStatus.PM_REVIEW,
+  DocumentStatus.FINANCE_MANAGER_REVIEW,
   DocumentStatus.SENT_TO_CLIENT,
   DocumentStatus.CLIENT_FEEDBACK,
   DocumentStatus.ACCEPTED,
   DocumentStatus.REJECTED,
+  // Workplan-specific statuses
+  DocumentStatus.RESEARCHING,
+  DocumentStatus.GENERATING,
+  DocumentStatus.COMPLETED,
+  DocumentStatus.FAILED,
 ]);
 
 const emailDirectionSchema = z.enum([
@@ -90,6 +100,21 @@ const teamRoleSchema = z.enum([
   TeamRole.ART_DIRECTOR,
   TeamRole.CLIENT_SERVICE,
 ]);
+
+// Workplan enum schemas
+const workplanServiceTypeSchema = z.enum(Object.values(WorkplanServiceType));
+
+const workplanStatusSchema = z.enum([
+  DocumentStatus.DRAFT,
+  DocumentStatus.RESEARCHING,
+  DocumentStatus.GENERATING,
+  DocumentStatus.COMPLETED,
+  DocumentStatus.FAILED,
+]);
+
+const slideTypeSchema = z.enum(Object.values(SlideType));
+
+const researchStatusSchema = z.enum(Object.values(ResearchStatus));
 
 // Base schemas
 const idSchema = z.number().int().positive();
@@ -308,6 +333,10 @@ module.exports = {
   jobStatusSchema,
   webhookProviderSchema,
   teamRoleSchema,
+  workplanServiceTypeSchema,
+  workplanStatusSchema,
+  slideTypeSchema,
+  researchStatusSchema,
   idSchema,
   emailSchema,
   urlSchema,

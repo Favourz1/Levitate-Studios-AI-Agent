@@ -33,6 +33,7 @@ model Project {
   phase           String   // QUESTIONNAIRE, BRAND_ORIGIN, QUOTE_DOCUMENT, FINALIZED, REJECTED
   asanaProjectGid String?  @map("asana_project_gid")
   context         String? @db.Text  // Additional project context
+  serviceTypes    Json?   @map("service_types") @db.JsonB // Cached LLM output: [{serviceType, rating, reasoning}, ...]
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -83,6 +84,7 @@ model Document {
   revisions         DocumentRevision[]
   currentRevision   DocumentRevision? @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
   lastSentRevision  DocumentRevision? @relation("LastSentRevision", fields: [lastSentRevisionId], references: [id])
+  workplanSlides    WorkplanSlide[]
 
   @@map("documents")
 }
@@ -103,6 +105,38 @@ model DocumentRevision {
   lastSentDocuments Document[] @relation("LastSentRevision")
 
   @@map("document_revisions")
+}
+
+model WorkplanSlide {
+  id                Int      @id @default(autoincrement())
+  documentId        Int      @map("document_id")
+  slideNumber       Int
+  slideType         String
+  title             String
+  researchData      Json?    @map("research_data") @db.JsonB
+  contentCopy       String?  @map("content_copy") @db.Text
+  dataPoints        Json?    @map("data_points") @db.JsonB
+  designDirectives  Json?    @map("design_directives") @db.JsonB
+  layoutType        String?  @map("layout_type")
+  visualElements    Json?    @map("visual_elements") @db.JsonB
+  researchStatus    String   @default("PENDING") @map("research_status")
+  contentStatus     String   @default("PENDING") @map("content_status")
+  designStatus      String   @default("PENDING") @map("design_status")
+  qualityScore      Decimal? @map("quality_score") @db.Decimal(3, 2)
+  metadataInfo      Json?    @map("metadata_info") @db.JsonB
+  requiresBigIdea   Boolean  @default(false) @map("requires_big_idea")
+  isOptional        Boolean  @default(false) @map("is_optional")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  document          Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, slideNumber])
+  @@index([documentId], map: "idx_workplan_slides_document_id")
+  @@index([slideType], map: "idx_workplan_slides_type")
+  @@index([researchStatus], map: "idx_workplan_slides_research_status")
+  @@map("workplan_slides")
 }
 
 model EmailThread {
