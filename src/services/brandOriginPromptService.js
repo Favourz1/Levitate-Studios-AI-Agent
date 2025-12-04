@@ -316,10 +316,7 @@ Generate the complete brand origin document now following this exact format.`;
 
     if (example.brandOrigin) {
       formatted += "**Example Brand Origin Structure:**\n";
-      formatted += `- Who Am I: ${example.brandOrigin.whoAmI?.substring(
-        0,
-        200
-      )}...\n`;
+      formatted += `- Who Am I: ${example.brandOrigin.whoAmI}...\n`;
       formatted += `- Brand Purpose: ${example.brandOrigin.brandPurpose}\n`;
       formatted += `- Vision: ${example.brandOrigin.vision}\n`;
       formatted += `- Single-Minded Message: ${example.brandOrigin.singleMindedMessage}\n\n`;

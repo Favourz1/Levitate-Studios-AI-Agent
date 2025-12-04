@@ -309,7 +309,7 @@ Extract the target region now.`;
           : JSON.stringify(clientContext, null, 2)
       }
 - Brand Origin Document: ${
-        brandOrigin ? brandOrigin.substring(0, 2000) : "Not available"
+        brandOrigin ? brandOrigin : "Not available"
       }
 
 **Task:**
@@ -386,7 +386,7 @@ Extract the industry now.`;
           : JSON.stringify(clientContext, null, 2)
       }
 - Brand Origin Document: ${
-        brandOrigin ? brandOrigin.substring(0, 2000) : "Not available"
+        brandOrigin ? brandOrigin : "Not available"
       }
 
 **Task:**
@@ -463,7 +463,7 @@ Extract the target audience now.`;
           : JSON.stringify(clientContext, null, 2)
       }
 - Brand Origin Document: ${
-        brandOrigin ? brandOrigin.substring(0, 2000) : "Not available"
+        brandOrigin ? brandOrigin : "Not available"
       }
 
 **Task:**
