@@ -11,6 +11,7 @@ const { asanaProjectInitProcessor } = require("@/workers/asanaProjectInit");
 const { quoteGenerationProcessor } = require("@/workers/quoteGeneration");
 const { notificationProcessor } = require("@/workers/notifications");
 const { snapshotSyncProcessor } = require("@/workers/snapshotSync");
+const { workplanGenerationProcessor } = require("@/workers/workplanGeneration");
 
 const logger = createLogger("workers");
 
@@ -61,6 +62,11 @@ const startWorkers = async () => {
         name: QUEUE_NAMES.SNAPSHOT_SYNC,
         processor: snapshotSyncProcessor,
         concurrency: 2, // Moderate concurrency for sync operations
+      },
+      {
+        name: QUEUE_NAMES.WORKPLAN_GENERATION,
+        processor: workplanGenerationProcessor,
+        concurrency: 2, // Moderate concurrency for workplan generation
       },
     ];
 

@@ -27,6 +27,7 @@ const QUEUE_NAMES = {
   QUOTE_GENERATION: "quote-generation",
   NOTIFICATIONS: "notifications",
   SNAPSHOT_SYNC: "snapshot-sync",
+  WORKPLAN_GENERATION: "workplan-generation",
 };
 
 // Queue instances
@@ -42,6 +43,9 @@ const queues = {
   }),
   notifications: new Queue(QUEUE_NAMES.NOTIFICATIONS, { connection: redis }),
   snapshotSync: new Queue(QUEUE_NAMES.SNAPSHOT_SYNC, { connection: redis }),
+  workplanGeneration: new Queue(QUEUE_NAMES.WORKPLAN_GENERATION, {
+    connection: redis,
+  }),
 };
 
 // Default job options
@@ -186,6 +190,53 @@ class QueueService {
     };
 
     return queues.snapshotSync.add("sync-snapshot", data, jobOptions);
+  }
+
+  // Workplan generation jobs
+  static async addWorkplanGenerationJob(data, priority = 0) {
+    // Create dedupe key based on whether it's a regeneration or initial generation
+    const dedupeKey = data.isRegeneration
+      ? `workplan:${data.documentId}:regenerate`
+      : `workplan:${data.projectId}:${data.serviceType}`;
+
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority: data.isRegeneration ? priority + 1 : priority, // Higher priority for regeneration
+      jobId: dedupeKey, // Ensure idempotency with dedupe key
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+    };
+
+    return queues.workplanGeneration.add(
+      "generate-workplan",
+      jobData,
+      jobOptions
+    );
+  }
+
+  // Slide regeneration jobs
+  static async addSlideRegenerationJob(data, priority = 0) {
+    const dedupeKey = `workplan-slide:${data.documentId}:${data.slideId}:regenerate`;
+
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority: priority + 1, // Higher priority for regenerations
+      jobId: dedupeKey,
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+    };
+
+    return queues.workplanGeneration.add(
+      "regenerate-slide",
+      jobData,
+      jobOptions
+    );
   }
 
   // Get job by ID
