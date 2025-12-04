@@ -47,6 +47,9 @@ const envSchema = Joi.object({
   OPENAI_API_KEY: Joi.string().required(),
   ANTHROPIC_API_KEY: Joi.string().optional(),
 
+  // Tavily
+  TAVILY_API_KEY: Joi.string().required(),
+
   // Application
   ADMIN_EMAIL: Joi.string().email().required(),
   FRONTEND_URL: Joi.string().uri().required(),
@@ -118,6 +121,9 @@ const appConfig = {
   llm: {
     openaiApiKey: envVars.OPENAI_API_KEY,
     anthropicApiKey: envVars.ANTHROPIC_API_KEY,
+  },
+  tavily: {
+    apiKey: envVars.TAVILY_API_KEY,
   },
   emailDomain: envVars.EMAIL_DOMAIN,
   emailReplyDomain: envVars.EMAIL_REPLY_DOMAIN,

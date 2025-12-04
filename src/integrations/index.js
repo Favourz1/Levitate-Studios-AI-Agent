@@ -10,6 +10,7 @@ const {
   erpIntegration,
   getErpIntegration,
 } = require("@/integrations/levitateStudiosErp");
+const { tavilyIntegration } = require("@/integrations/tavily");
 
 module.exports = {
   AsanaIntegration,
@@ -20,4 +21,5 @@ module.exports = {
   LevitateStudiosErpIntegration,
   erpIntegration,
   getErpIntegration,
+  tavilyIntegration,
 };

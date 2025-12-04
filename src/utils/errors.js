@@ -114,6 +114,12 @@ class GoogleError extends IntegrationError {
   }
 }
 
+class TavilyError extends IntegrationError {
+  constructor(action, originalError, context) {
+    super("Tavily", action, originalError, context);
+  }
+}
+
 // Error handler utility functions
 const isOperationalError = (error) => {
   if (error instanceof BaseError) {
@@ -161,6 +167,7 @@ module.exports = {
   AsanaError,
   BrevoError,
   GoogleError,
+  TavilyError,
   isOperationalError,
   extractErrorContext,
   createErrorResponse,
