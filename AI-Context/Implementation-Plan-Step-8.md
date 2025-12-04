@@ -78,12 +78,15 @@ const WorkplanServiceType = {
   ADVERTISING: "ADVERTISING",
 };
 
+// Note: Workplan status is stored in Document.status field using DocumentStatus enum
+// The following constants are kept for reference but should use DocumentStatus instead:
+// So do not use this
 const WorkplanStatus = {
-  DRAFT: "DRAFT",
-  RESEARCHING: "RESEARCHING",
-  GENERATING: "GENERATING",
-  COMPLETED: "COMPLETED",
-  FAILED: "FAILED",
+  DRAFT: "DRAFT", // Use DocumentStatus.DRAFT
+  RESEARCHING: "RESEARCHING", // Use DocumentStatus.RESEARCHING
+  GENERATING: "GENERATING", // Use DocumentStatus.GENERATING
+  COMPLETED: "COMPLETED", // Use DocumentStatus.COMPLETED
+  FAILED: "FAILED", // Use DocumentStatus.FAILED
 };
 
 const SlideType = {
@@ -125,11 +128,11 @@ const ResearchStatus = {
 The `documents` table already exists and includes a `metadataInfo` JSONB field. For workplan documents:
 
 - `type` = `DocumentType.WORKPLAN` (new enum value)
+- `status` = `DocumentStatus.DRAFT` (or `RESEARCHING`, `GENERATING`, `COMPLETED`, `FAILED` for workplan-specific statuses)
 - `metadataInfo` stores workplan-specific metadata:
   ```json
   {
-    "serviceType": "MARKETING_CAMPAIGN",
-    "status": "RESEARCHING", // DRAFT, RESEARCHING, GENERATING, COMPLETED, FAILED
+    "serviceType": "MARKETING_CAMPAIGN", // Reference copy (primary source is project.serviceTypes)
     "tableOfContents": [...], // Array of slide definitions with order
     "generatedAt": "2024-01-15T10:00:00Z",
     "completedAt": "2024-01-15T12:00:00Z"
@@ -137,6 +140,39 @@ The `documents` table already exists and includes a `metadataInfo` JSONB field. 
   ```
 
 **No schema changes needed** - workplan metadata is stored in `metadataInfo` JSONB field.
+
+#### `projects` table
+
+The `projects` table already includes a `serviceTypes` JSONB field (see `prisma/schema.prisma` line 36). This field stores the full LLM output for service type determination: - ADD IF NOT ALREADY THERE
+
+- `serviceTypes` (JSONB): Array of service matches with ratings:
+  ```json
+  [
+    {
+      "serviceType": "MARKETING_CAMPAIGN",
+      "rating": 9.5,
+      "reasoning": "Client needs comprehensive marketing strategy..."
+    },
+    {
+      "serviceType": "GTM_STRATEGY",
+      "rating": 7.2,
+      "reasoning": "Some elements align with go-to-market..."
+    },
+    {
+      "serviceType": "GENERAL",
+      "rating": 3.0,
+      "reasoning": "Fallback option..."
+    }
+  ]
+  ```
+
+**Key Points:**
+
+- Service type is determined **once** using LLM and cached in `project.serviceTypes`
+- Full array of matches is stored (not just the selected one)
+- Highest-rated match is selected when service type is needed
+- Cache is checked before calling LLM (avoids redundant calls)
+- Provides consistency across all agents in the pipeline
 
 ---
 
@@ -1023,7 +1059,7 @@ class WorkplanDocumentBuilderService {
     // 5. For each slide: convert to blocks (Research Data → Content → Design Directives)
     // 6. Assemble all blocks
     // 7. Call googleIntegration.createFormattedDocument (fixed/rebuilt)
-    // 8. Update document.metadataInfo.status to COMPLETED
+    // 8. Update document.status to COMPLETED
     // 9. Return Google Doc URL
   }
 }
@@ -1291,13 +1327,13 @@ router.post("/workplan/:documentId/regenerate", async (req, res) => {
       });
     }
 
-    // 2. Update workplan status to DRAFT
+    // 2. Update document status to DRAFT
     await prisma.document.update({
       where: { id: parseInt(documentId) },
       data: {
+        status: "DRAFT",
         metadataInfo: {
           ...(workplanDoc.metadataInfo || {}),
-          status: "DRAFT",
           regenerationReason: reason || null,
           regeneratedAt: new Date().toISOString(),
         },
@@ -1314,10 +1350,10 @@ router.post("/workplan/:documentId/regenerate", async (req, res) => {
       },
     });
 
-    // 4. Determine service type from metadataInfo or questionnaire
-    const serviceType =
-      workplanDoc.metadataInfo?.serviceType ||
-      determineServiceType(workplanDoc.project);
+    // 4. Get service type (uses cache if available)
+    const serviceType = await WorkplanPlannerService.getServiceType(
+      workplanDoc.projectId
+    );
 
     // 5. Enqueue workplan generation job with regeneration flag
     await QueueService.addWorkplanGenerationJob(
@@ -1388,7 +1424,7 @@ router.post("/workplan/:documentId/regenerate", async (req, res) => {
 const workplanGenerationProcessor = async (job) => {
   const {
     projectId,
-    serviceType,
+    serviceType: providedServiceType,
     documentId, // Optional - if present, this is a regeneration
     isRegeneration = false,
     regenerationReason = null,
@@ -1396,6 +1432,15 @@ const workplanGenerationProcessor = async (job) => {
   } = job.data;
 
   try {
+    // Get service type ONCE at start (checks project.serviceTypes cache)
+    let serviceType = providedServiceType;
+    if (!serviceType) {
+      serviceType = await WorkplanPlannerService.getServiceType(projectId);
+    }
+
+    // Pass through context - all agents use this, don't call getServiceType() again
+    const context = { projectId, serviceType, ... };
+
     // If regeneration, load existing document and incorporate feedback
     if (isRegeneration && documentId) {
       const existingDoc = await prisma.document.findUnique({
@@ -1411,6 +1456,7 @@ const workplanGenerationProcessor = async (job) => {
     }
 
     // Execute pipeline (Agent A → B → C → D → E)
+    // All agents use serviceType from context (consistent across pipeline)
     // Agent C should incorporate regenerationReason if present
     // ...
   } catch (error) {
@@ -1425,10 +1471,19 @@ const workplanGenerationProcessor = async (job) => {
 // src/workers/workplanGeneration.js
 
 const workplanGenerationProcessor = async (job) => {
-  const { projectId, serviceType, retryCount = 0 } = job.data;
+  const { projectId, serviceType: providedServiceType, retryCount = 0 } = job.data;
 
   try {
-    // Execute pipeline
+    // Get service type ONCE at start (checks project.serviceTypes cache)
+    let serviceType = providedServiceType;
+    if (!serviceType) {
+      serviceType = await WorkplanPlannerService.getServiceType(projectId);
+    }
+
+    // Pass through context - all agents use this, don't call getServiceType() again
+    const context = { projectId, serviceType, ... };
+
+    // Execute pipeline (all agents use serviceType from context)
   } catch (error) {
     // Retry logic:
     // - Research failures: Retry up to 3 times
@@ -1439,7 +1494,7 @@ const workplanGenerationProcessor = async (job) => {
       await QueueService.addWorkplanGenerationJob(
         {
           projectId,
-          serviceType,
+          serviceType: providedServiceType, // Preserve original if provided
           retryCount: retryCount + 1,
         },
         {
@@ -1458,7 +1513,81 @@ const workplanGenerationProcessor = async (job) => {
 
 ## 10. Integration Points
 
-### 10.1 Trigger from Step 7 (Asana Project Init)
+### 10.1 Service Type Determination & Caching Architecture
+
+**CRITICAL**: Service type is determined **once** per project using LLM and cached in `project.serviceTypes` JSONB field to ensure consistency across all agents.
+
+#### Architecture Overview
+
+1. **Database Storage**: `project.serviceTypes` stores full LLM output as JSONB array:
+
+   ```json
+   [
+     {
+       "serviceType": "MARKETING_CAMPAIGN",
+       "rating": 9.5,
+       "reasoning": "Client needs comprehensive marketing strategy..."
+     },
+     {
+       "serviceType": "GTM_STRATEGY",
+       "rating": 7.2,
+       "reasoning": "Some elements align with go-to-market..."
+     }
+   ]
+   ```
+
+2. **Main Entry Point**: `WorkplanPlannerService.getServiceType(projectId, forceRefresh)`
+
+   - Checks `project.serviceTypes` cache first
+   - If cache exists and not empty → returns highest-rated from cache
+   - If cache missing/empty or `forceRefresh=true` → calls LLM, stores result, returns highest-rated
+
+3. **Helper Methods**:
+
+   - `getHighestRatedServiceType(serviceMatches)` - Extracts highest-rated (rating >= 5) or "GENERAL"
+   - `getServiceTypeMatches(projectId)` - Returns full array for inspection/debugging
+   - `_determineServiceTypeWithLLM(projectId)` - Internal LLM call (only when cache empty)
+
+4. **Usage Pattern**:
+
+   ```javascript
+   // ✅ CORRECT: Get once at start, use everywhere
+   const serviceType = await WorkplanPlannerService.getServiceType(projectId);
+   const context = { projectId, serviceType, ... };
+   // All agents use serviceType from context
+
+   // ❌ WRONG: Don't call multiple times
+   const st1 = await WorkplanPlannerService.getServiceType(projectId);
+   const st2 = await WorkplanPlannerService.getServiceType(projectId); // Redundant!
+   ```
+
+5. **Flow**:
+   ```
+   Workplan Generation Starts
+       ↓
+   getServiceType(projectId) called
+       ↓
+   Check project.serviceTypes array
+       ├─→ EXISTS & NOT EMPTY → Get highest rated → Return
+       └─→ MISSING/EMPTY → Call LLM → Store array → Get highest rated → Return
+       ↓
+   Service type passed through pipeline context
+       ├─→ Agent A (Planner) uses it
+       ├─→ Agent B (Researcher) uses it
+       ├─→ Agent C (Strategist) uses it
+       ├─→ Agent D (Art Director) uses it
+       └─→ Agent E (Document Builder) uses it
+   ```
+
+**Key Benefits:**
+
+- Single LLM determination per project (cached)
+- Full reasoning preserved (all matches with ratings)
+- Consistent usage across all agents
+- Flexible selection (can inspect or change logic)
+- Fallback to "GENERAL" if rating < 5
+
+### 10.2 Trigger from Step 7 (Asana Project Init)
 
 ```javascript
 // src/workers/asanaProjectInit.js
@@ -1466,10 +1595,13 @@ const workplanGenerationProcessor = async (job) => {
 // After project initialization, enqueue workplan generation
 // NOTE: Completion email (currently at line 413 in `src\workers\asanaProjectInit.js`) will be moved to after workplan generation completes
 
+// Get service type (uses cache if available, calls LLM if needed)
+const serviceType = await WorkplanPlannerService.getServiceType(project.id);
+
 await QueueService.addWorkplanGenerationJob(
   {
     projectId: project.id,
-    serviceType: determineServiceType(project), // From questionnaire, falls back to GENERAL if unknown
+    serviceType, // Cached or newly determined
   },
   {
     priority: 5, // High priority
@@ -1477,30 +1609,166 @@ await QueueService.addWorkplanGenerationJob(
 );
 ```
 
-**Service Type Determination Logic:**
+**Service Type Determination Logic (Cached LLM-Based Approach):**
+
+The service type is determined once per project using LLM and cached in `project.serviceTypes` JSONB field to ensure consistency across all agents.
 
 ```javascript
-// src/services/workplanService.js
+// src/services/workplanPlannerService.js
 
-function determineServiceType(project) {
-  // Extract from questionnaire responses
-  const questionnaire = project.questionnaireResponses?.[0]?.responses;
-  const serviceRequested = questionnaire?.serviceType || questionnaire?.service;
+class WorkplanPlannerService {
+  /**
+   * Main entry point: Get service type for project (uses cache if available)
+   * @param {number} projectId - Project ID
+   * @param {boolean} forceRefresh - Optional, force re-determination
+   * @returns {Promise<string>} Service type string (e.g., "MARKETING_CAMPAIGN", "GENERAL")
+   */
+  static async getServiceType(projectId, forceRefresh = false) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { serviceTypes: true },
+    });
 
-  // Map to WorkplanServiceType enum
-  const serviceTypeMap = {
-    "Logo Design": WorkplanServiceType.LOGO_DESIGN,
-    "Marketing Campaign": WorkplanServiceType.MARKETING_CAMPAIGN,
-    "Go-to-Market Strategy": WorkplanServiceType.GTM_STRATEGY,
-    "360 Campaign": WorkplanServiceType.GTM_360_CAMPAIGN,
-    "Social Media Strategy": WorkplanServiceType.SOCIAL_MEDIA_STRATEGY,
-    // ... other mappings
-  };
+    // Check cache first (unless force refresh)
+    if (
+      !forceRefresh &&
+      project?.serviceTypes &&
+      Array.isArray(project.serviceTypes) &&
+      project.serviceTypes.length > 0
+    ) {
+      return this.getHighestRatedServiceType(project.serviceTypes);
+    }
 
-  // Return mapped type or GENERAL fallback
-  return serviceTypeMap[serviceRequested] || "GENERAL";
+    // Cache miss or force refresh: determine with LLM
+    const serviceMatches = await this._determineServiceTypeWithLLM(projectId);
+
+    // Store full array in cache
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { serviceTypes: serviceMatches },
+    });
+
+    // Return highest rated
+    return this.getHighestRatedServiceType(serviceMatches);
+  }
+
+  /**
+   * Get highest-rated service type from matches array
+   * @param {Array} serviceMatches - Array of {serviceType, rating, reasoning}
+   * @returns {string} Service type with highest rating (or "GENERAL" if rating < 5)
+   */
+  static getHighestRatedServiceType(serviceMatches) {
+    if (!Array.isArray(serviceMatches) || serviceMatches.length === 0) {
+      return "GENERAL";
+    }
+
+    // Sort by rating descending
+    const sorted = [...serviceMatches].sort((a, b) => b.rating - a.rating);
+    const topMatch = sorted[0];
+
+    // Return top match if rating >= 5, otherwise GENERAL
+    return topMatch.rating >= 5 ? topMatch.serviceType : "GENERAL";
+  }
+
+  /**
+   * Get full array of service matches for inspection/debugging
+   * @param {number} projectId - Project ID
+   * @returns {Promise<Array>} Full array of {serviceType, rating, reasoning}
+   */
+  static async getServiceTypeMatches(projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { serviceTypes: true },
+    });
+
+    return project?.serviceTypes || [];
+  }
+
+  /**
+   * Internal: Call LLM to determine service types (called only when cache is empty)
+   * @param {number} projectId - Project ID
+   * @returns {Promise<Array>} Array of {serviceType, rating, reasoning}
+   */
+  static async _determineServiceTypeWithLLM(projectId) {
+    // Load project context
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        client: true,
+        questionnaireResponses: { orderBy: { submittedAt: "desc" }, take: 1 },
+        documents: {
+          where: {
+            type: { in: [DocumentType.BRAND_ORIGIN, DocumentType.QUOTE] },
+            status: DocumentStatus.ACCEPTED,
+          },
+          include: {
+            revisions: { orderBy: { createdAt: "desc" }, take: 1 },
+          },
+        },
+      },
+    });
+
+    // Assemble context
+    const context = {
+      questionnaire: project.questionnaireResponses?.[0]?.responses || {},
+      brandOrigin: project.documents.find(
+        (d) => d.type === DocumentType.BRAND_ORIGIN
+      )?.revisions?.[0]?.snapshotText,
+      quoteText: project.documents.find((d) => d.type === DocumentType.QUOTE)
+        ?.revisions?.[0]?.snapshotText,
+      clientContext: project.client.context,
+      projectContext: project.context,
+    };
+
+    // Call LLM with structured output
+    const schema = z.object({
+      serviceMatches: z.array(
+        z.object({
+          serviceType: z.enum([
+            ...Object.values(WorkplanServiceType),
+            "GENERAL",
+          ]),
+          rating: z.number().min(0).max(10),
+          reasoning: z.string(),
+        })
+      ),
+    });
+
+    try {
+      const result = await llmClient.generateStructured(
+        schema,
+        buildServiceTypePrompt(context, Object.values(WorkplanServiceType)),
+        context,
+        "service-type-determination"
+      );
+
+      return result.serviceMatches || [];
+    } catch (error) {
+      logger.error(
+        { projectId, error },
+        "Failed to determine service type with LLM"
+      );
+      // Return fallback
+      return [
+        {
+          serviceType: "GENERAL",
+          rating: 0,
+          reasoning: `Error: ${error.message}`,
+        },
+      ];
+    }
+  }
 }
 ```
+
+**Key Points:**
+
+- Service type is determined **once** at workplan generation start
+- Full LLM output (all matches with ratings) is stored in `project.serviceTypes` JSONB array
+- Subsequent calls read from cache (no redundant LLM calls)
+- Highest-rated match is selected when service type is needed
+- Falls back to "GENERAL" if rating < 5 or on error
+- Provides `getServiceTypeMatches()` for inspection/debugging
 
 ### 10.2 Asana Task Creation
 

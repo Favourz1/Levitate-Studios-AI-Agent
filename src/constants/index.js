@@ -22,6 +22,11 @@ const DocumentStatus = {
   CLIENT_FEEDBACK: "CLIENT_FEEDBACK",
   ACCEPTED: "ACCEPTED",
   REJECTED: "REJECTED",
+  // Workplan-specific statuses
+  RESEARCHING: "RESEARCHING",
+  GENERATING: "GENERATING",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
 };
 
 const EmailDirection = {
