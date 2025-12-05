@@ -702,45 +702,62 @@ class GoogleIntegration {
 
   /**
    * Process document blocks and apply formatting using batchUpdate
-   * Uses a simplified approach that inserts content at the end of the document
+   * Uses a robust "Create, Inspect, Fill" strategy for tables to ensure accuracy.
    * @private
    */
   async processDocumentBlocks(documentId, blocks) {
     try {
-      // Get current document to find the end index
-      const doc = await this.docs.documents.get({ documentId });
-      let currentIndex =
-        doc.data.body.content[doc.data.body.content.length - 1].endIndex - 1;
+      if (!Array.isArray(blocks) || blocks.length === 0) return;
 
-      // Process blocks sequentially to avoid index conflicts
+      // Initialize index
+      let currentIndex = await this.getDocumentEndIndex(documentId);
+      let currentBatch = [];
+
       for (const block of blocks) {
-        if (!block || !block.type) {
-          logger.warn({ block }, "Skipping invalid block");
+        if (!block || !block.type) continue;
+
+        // --- SPECIAL HANDLING FOR TABLES ---
+        if (block.type === "table") {
+          // 1. Flush any pending text blocks first
+          if (currentBatch.length > 0) {
+            await this.docs.documents.batchUpdate({
+              documentId,
+              requestBody: { requests: currentBatch },
+            });
+            currentBatch = [];
+          }
+
+          // 2. Handle the table completely (Create -> Fetch Layout -> Fill)
+          await this.processTableBlock(documentId, block);
+
+          // 3. Re-sync index for subsequent blocks
+          currentIndex = await this.getDocumentEndIndex(documentId);
           continue;
         }
+        // -----------------------------------
 
-        const insertedLength = await this.processBlock(
-          documentId,
-          block,
-          currentIndex
-        );
-        currentIndex += insertedLength;
+        // Normal processing for text/images/spacers
+        const { requests: blockRequests, insertedLength } =
+          await this.buildBlockRequests(documentId, block, currentIndex);
+
+        if (blockRequests.length > 0) {
+          currentBatch.push(...blockRequests);
+          currentIndex += insertedLength;
+        }
       }
 
-      logger.info(
-        {
+      // Flush remaining requests
+      if (currentBatch.length > 0) {
+        await this.docs.documents.batchUpdate({
           documentId,
-          blocksProcessed: blocks.length,
-        },
-        "All blocks processed successfully"
-      );
+          requestBody: { requests: currentBatch },
+        });
+      }
+
+      logger.info({ documentId }, "All blocks processed successfully");
     } catch (error) {
       logger.error(
-        {
-          documentId,
-          error: error.message,
-          blocksCount: blocks.length,
-        },
+        { documentId, error: error.message },
         "Failed to process document blocks"
       );
       throw new Error(`Failed to process document blocks: ${error.message}`);
@@ -748,376 +765,448 @@ class GoogleIntegration {
   }
 
   /**
-   * Process a single block and return the length of content inserted
+   * specialized handler for Tables that creates the grid,
+   * then fetches the doc to find the exact cell indices to fill.
    * @private
    */
-  async processBlock(documentId, block, startIndex) {
+  async processTableBlock(documentId, block) {
+    if (!block.rows || block.rows.length === 0) return;
+
+    const rows = block.rows.length;
+    const cols = Math.max(
+      ...block.rows.map((row) => (Array.isArray(row) ? row.length : 0))
+    );
+    if (cols === 0) return;
+
+    // 1. Create the empty table at the very end of the document
+    await this.docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertTable: {
+              rows,
+              columns: cols,
+              endOfSegmentLocation: { segmentId: "" }, // Safe insertion at end
+            },
+          },
+        ],
+      },
+    });
+
+    // 2. Fetch the document to get the REAL indices of the new table cells
+    // This removes all "math guessing" and fixes the empty table issue.
+    const doc = await this.docs.documents.get({ documentId });
+    const bodyContent = doc.data.body.content;
+    const lastElement = bodyContent[bodyContent.length - 1];
+
+    // The table should be the last structural element (or second to last if there's a trailing newline)
+    // We search backwards for the table.
+    let table = null;
+    for (let i = bodyContent.length - 1; i >= 0; i--) {
+      if (bodyContent[i].table) {
+        table = bodyContent[i].table;
+        break;
+      }
+    }
+
+    if (!table) {
+      logger.warn(
+        { documentId },
+        "Created table but could not find it in doc structure"
+      );
+      return;
+    }
+
+    // 3. Construct requests to fill the cells
+    const textRequests = [];
+
+    // Iterate rows and cells safely
+    for (let r = 0; r < Math.min(rows, table.tableRows.length); r++) {
+      const rowData = block.rows[r];
+      if (!Array.isArray(rowData)) continue;
+
+      const tableRow = table.tableRows[r];
+
+      for (let c = 0; c < Math.min(cols, tableRow.tableCells.length); c++) {
+        const cellText = rowData[c];
+        if (!cellText || typeof cellText !== "string" || !cellText.trim())
+          continue;
+
+        // The API guarantees content inside a cell. We insert at the START index of the cell.
+        // tableRow.tableCells[c].content usually starts with a paragraph.
+        // We generally want to insert at `startIndex` of the cell's first content element.
+        // However, safest is `startIndex` of the cell struct + 1?
+        // Actually, looking at the JSON structure, tableCell has `startIndex`.
+        // Writing at `startIndex + 1` usually lands inside the cell.
+        // BUT, a cell always contains a Paragraph.
+        // The safest target is the `startIndex` of the first paragraph *inside* the cell.
+
+        const cell = tableRow.tableCells[c];
+        let insertIndex = cell.startIndex; // Default fallback
+
+        // Find the first paragraph content in the cell to get a valid text insertion index
+        if (cell.content && cell.content.length > 0) {
+          insertIndex = cell.content[0].startIndex;
+        }
+
+        textRequests.push({
+          insertText: {
+            location: { index: insertIndex },
+            text: cellText,
+          },
+        });
+      }
+    }
+
+    // 4. Send the fill requests AND the safety newline in one go
+    // Note: We use endOfSegmentLocation for the newline to avoid index math errors again.
+    if (textRequests.length > 0) {
+      // Reverse requests to keep indices valid (inserting later text first)
+      // Actually, since we fetched absolute indices from the doc,
+      // we must process them in REVERSE order of index so earlier inserts don't shift later ones.
+      textRequests.sort(
+        (a, b) => b.insertText.location.index - a.insertText.location.index
+      );
+
+      const finalRequests = [...textRequests];
+
+      // Add safety newline after table
+      finalRequests.push({
+        insertText: {
+          endOfSegmentLocation: { segmentId: "" },
+          text: "\n",
+        },
+      });
+
+      await this.docs.documents.batchUpdate({
+        documentId,
+        requestBody: { requests: finalRequests },
+      });
+    } else {
+      // Just the safety newline
+      await this.docs.documents.batchUpdate({
+        documentId,
+        requestBody: {
+          requests: [
+            {
+              insertText: {
+                endOfSegmentLocation: { segmentId: "" },
+                text: "\n",
+              },
+            },
+          ],
+        },
+      });
+    }
+  }
+
+  /**
+   * Get the current end index of the document body
+   * @private
+   */
+  async getDocumentEndIndex(documentId) {
+    try {
+      const doc = await this.docs.documents.get({ documentId });
+      const body = doc.data?.body?.content;
+      if (Array.isArray(body) && body.length > 0) {
+        return body[body.length - 1].endIndex - 1;
+      }
+    } catch (error) {
+      logger.warn(
+        { documentId, error: error.message },
+        "Failed to fetch document end index, defaulting to 1"
+      );
+    }
+    return 1;
+  }
+
+  /**
+   * Build Docs API requests for a single block without issuing API calls.
+   * Returns the request set and the logical length inserted.
+   * @private
+   */
+  async buildBlockRequests(documentId, block, startIndex) {
     const requests = [];
     let insertedLength = 0;
 
     switch (block.type) {
-      case "image":
-        if (block.url || block.fileId) {
+      case "image": {
+        if (!(block.url || block.fileId)) break;
+
+        let imageUrl = block.url;
+        if (block.fileId) {
           try {
-            let imageUrl = block.url;
-
-            // If fileId is provided, try to get webContentLink from Google Drive
-            if (block.fileId) {
-              try {
-                const file = await this.drive.files.get({
-                  fileId: block.fileId,
-                  fields: "webContentLink,webViewLink,exportLinks",
-                });
-
-                // Use webContentLink if available, otherwise fall back to webViewLink
-                if (file.data.webContentLink) {
-                  imageUrl = file.data.webContentLink;
-                  logger.info(
-                    {
-                      fileId: block.fileId,
-                      webContentLink: imageUrl,
-                    },
-                    "Successfully retrieved webContentLink for image"
-                  );
-                } else if (file.data.webViewLink) {
-                  imageUrl = file.data.webViewLink;
-                  logger.info(
-                    {
-                      fileId: block.fileId,
-                      webViewLink: imageUrl,
-                    },
-                    "Using webViewLink as fallback for image"
-                  );
-                } else {
-                  throw new Error("No accessible link found for image file");
-                }
-              } catch (fileError) {
-                logger.warn(
-                  {
-                    fileId: block.fileId,
-                    error: fileError.message,
-                  },
-                  "Failed to get webContentLink for image file, skipping image"
-                );
-
-                // Skip image insertion but add a text placeholder
-                requests.push({
-                  insertText: {
-                    location: { index: startIndex },
-                    text: "[Image placeholder - could not load image]\n",
-                  },
-                });
-
-                insertedLength = "[Image placeholder - could not load image]\n"
-                  .length;
-                break;
-              }
-            }
-
-            const width = block.width || 300;
-            const height = block.height || null;
-
-            const imageRequest = {
-              insertInlineImage: {
-                location: { index: startIndex },
-                uri: imageUrl,
-                objectSize: {
-                  width: { magnitude: width, unit: "PT" },
-                },
-              },
-            };
-
-            if (height) {
-              imageRequest.insertInlineImage.objectSize.height = {
-                magnitude: height,
-                unit: "PT",
-              };
-            }
-
-            requests.push(imageRequest);
-
-            // Add spacing after image
-            requests.push({
-              insertText: {
-                location: { index: startIndex + 1 },
-                text: "\n",
-              },
+            const file = await this.drive.files.get({
+              fileId: block.fileId,
+              fields: "webContentLink,webViewLink",
             });
-
-            insertedLength = 2; // Image + newline
-          } catch (imageError) {
+            imageUrl =
+              file.data.webContentLink ||
+              file.data.webViewLink ||
+              imageUrl ||
+              null;
+          } catch (fileError) {
             logger.warn(
-              {
-                documentId,
-                imageUrl: block.url,
-                fileId: block.fileId,
-                error: imageError.message,
-              },
-              "Failed to process image block, skipping image and adding text placeholder"
+              { documentId, fileId: block.fileId, error: fileError.message },
+              "Falling back to text placeholder for image"
             );
-
-            // Skip image insertion but add a text placeholder
-            requests.push({
-              insertText: {
-                location: { index: startIndex },
-                text: "[Image placeholder - could not load image]\n",
-              },
-            });
-
-            insertedLength = "[Image placeholder - could not load image]\n"
-              .length;
+            imageUrl = null;
           }
         }
-        break;
 
-      case "table":
-        if (block.rows && Array.isArray(block.rows) && block.rows.length > 0) {
-          const rows = block.rows.length;
-          const cols = Math.max(
-            ...block.rows.map((row) => (Array.isArray(row) ? row.length : 0))
-          );
-
-          if (cols > 0) {
-            requests.push({
-              insertTable: {
-                rows,
-                columns: cols,
-                location: { index: startIndex },
-              },
-            });
-
-            // Add spacing after table
-            requests.push({
-              insertText: {
-                location: { index: startIndex + 1 },
-                text: "\n",
-              },
-            });
-
-            insertedLength = rows * cols + 1; // Rough estimate
-          }
+        if (!imageUrl) {
+          const placeholder = "[Image placeholder - could not load image]\n";
+          requests.push({
+            insertText: { location: { index: startIndex }, text: placeholder },
+          });
+          insertedLength = placeholder.length;
+          break;
         }
-        break;
 
-      case "heading":
-        if (block.text) {
-          const text = `${block.text}\n`;
-          requests.push({
-            insertText: {
-              location: { index: startIndex },
-              text: text,
-            },
-          });
+        const width = block.width || 300;
+        const height = block.height || null;
 
-          // Apply heading style
-          requests.push({
-            updateParagraphStyle: {
-              range: {
-                startIndex: startIndex,
-                endIndex: startIndex + block.text.length,
-              },
-              paragraphStyle: {
-                namedStyleType: `HEADING_${Math.min(
-                  Math.max(block.level || 1, 1),
-                  6
-                )}`,
-              },
-              fields: "namedStyleType",
-            },
-          });
-
-          insertedLength = text.length;
+        const imageRequest = {
+          insertInlineImage: {
+            location: { index: startIndex },
+            uri: imageUrl,
+            objectSize: { width: { magnitude: width, unit: "PT" } },
+          },
+        };
+        if (height) {
+          imageRequest.insertInlineImage.objectSize.height = {
+            magnitude: height,
+            unit: "PT",
+          };
         }
+
+        requests.push(imageRequest);
+        requests.push({
+          insertText: { location: { index: startIndex + 1 }, text: "\n" },
+        });
+        insertedLength = 2; // image placeholder + newline in Docs index space
         break;
+      }
 
-      case "paragraph":
-        if (block.text) {
-          const text = `${block.text}\n`;
-          requests.push({
-            insertText: {
-              location: { index: startIndex },
-              text: text,
+      case "heading": {
+        if (!block.text) break;
+        const text = `${block.text}\n`;
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: {
+              startIndex,
+              endIndex: startIndex + block.text.length,
             },
-          });
-
-          insertedLength = text.length;
-        }
+            paragraphStyle: {
+              namedStyleType: `HEADING_${Math.min(
+                Math.max(block.level || 1, 1),
+                6
+              )}`,
+            },
+            fields: "namedStyleType",
+          },
+        });
+        insertedLength = text.length;
         break;
+      }
 
-      case "styled":
-        if (block.text && block.style) {
-          const text = `${block.text}\n`;
-          requests.push({
-            insertText: {
-              location: { index: startIndex },
-              text: text,
-            },
-          });
+      case "paragraph": {
+        if (!block.text) break;
+        const text = `${block.text}\n`;
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
 
-          // Apply text styling
-          const textStyle = {};
+        // Optional paragraph style (alignment/indentation)
+        if (block.style && Object.keys(block.style).length > 0) {
+          const paragraphStyle = {};
           const fields = [];
 
-          if (block.style.bold) {
-            textStyle.bold = true;
-            fields.push("bold");
+          if (block.style.alignment) {
+            paragraphStyle.alignment = block.style.alignment;
+            fields.push("alignment");
           }
-          if (block.style.italic) {
-            textStyle.italic = true;
-            fields.push("italic");
-          }
-          if (block.style.underline) {
-            textStyle.underline = true;
-            fields.push("underline");
-          }
-          if (block.style.fontSize) {
-            textStyle.fontSize = {
-              magnitude: block.style.fontSize,
+          if (block.style.indentStart) {
+            paragraphStyle.indentStart = {
+              magnitude: block.style.indentStart,
               unit: "PT",
             };
-            fields.push("fontSize");
+            fields.push("indentStart");
           }
-          if (block.style.foregroundColor) {
-            textStyle.foregroundColor = {
-              color: { rgbColor: block.style.foregroundColor },
+          if (block.style.indentEnd) {
+            paragraphStyle.indentEnd = {
+              magnitude: block.style.indentEnd,
+              unit: "PT",
             };
-            fields.push("foregroundColor");
+            fields.push("indentEnd");
+          }
+          if (block.style.lineSpacing) {
+            paragraphStyle.lineSpacing = block.style.lineSpacing;
+            fields.push("lineSpacing");
           }
 
           if (fields.length > 0) {
             requests.push({
-              updateTextStyle: {
+              updateParagraphStyle: {
                 range: {
-                  startIndex: startIndex,
+                  startIndex,
                   endIndex: startIndex + block.text.length,
                 },
-                textStyle,
+                paragraphStyle,
                 fields: fields.join(","),
               },
             });
           }
-
-          insertedLength = text.length;
         }
-        break;
-
-      case "bullets":
-      case "numbered":
-        if (
-          block.items &&
-          Array.isArray(block.items) &&
-          block.items.length > 0
-        ) {
-          let text = "";
-          for (const item of block.items) {
-            text += `${item}\n`;
-          }
-
-          requests.push({
-            insertText: {
-              location: { index: startIndex },
-              text: text,
-            },
-          });
-
-          // Apply bullet formatting to the range
-          const bulletPreset =
-            block.type === "bullets"
-              ? "BULLET_DISC_CIRCLE"
-              : "NUMBERED_DECIMAL";
-
-          requests.push({
-            createParagraphBullets: {
-              range: {
-                startIndex: startIndex,
-                endIndex: startIndex + text.length - 1,
-              },
-              bulletPreset,
-            },
-          });
-
-          insertedLength = text.length;
-        }
-        break;
-
-      case "spacer":
-        const height = block.height || 12;
-        const newlines = Math.max(1, Math.floor(height / 12));
-        const text = "\n".repeat(newlines);
-
-        requests.push({
-          insertText: {
-            location: { index: startIndex },
-            text: text,
-          },
-        });
 
         insertedLength = text.length;
         break;
+      }
+
+      case "styled": {
+        if (!block.text || !block.style) break;
+        const text = `${block.text}\n`;
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
+
+        const textStyle = {};
+        const fields = [];
+
+        if (block.style.bold) {
+          textStyle.bold = true;
+          fields.push("bold");
+        }
+        if (block.style.italic) {
+          textStyle.italic = true;
+          fields.push("italic");
+        }
+        if (block.style.underline) {
+          textStyle.underline = true;
+          fields.push("underline");
+        }
+        if (block.style.strikethrough) {
+          textStyle.strikethrough = true;
+          fields.push("strikethrough");
+        }
+        if (block.style.fontSize) {
+          textStyle.fontSize = {
+            magnitude: block.style.fontSize,
+            unit: "PT",
+          };
+          fields.push("fontSize");
+        }
+        if (block.style.fontFamily) {
+          textStyle.weightedFontFamily = { fontFamily: block.style.fontFamily };
+          fields.push("weightedFontFamily");
+        }
+        if (block.style.foregroundColor) {
+          textStyle.foregroundColor = {
+            color: { rgbColor: block.style.foregroundColor },
+          };
+          fields.push("foregroundColor");
+        }
+        if (block.style.backgroundColor) {
+          textStyle.backgroundColor = {
+            color: { rgbColor: block.style.backgroundColor },
+          };
+          fields.push("backgroundColor");
+        }
+        if (block.style.link) {
+          textStyle.link = { url: block.style.link };
+          fields.push("link");
+        }
+
+        if (fields.length > 0) {
+          requests.push({
+            updateTextStyle: {
+              range: {
+                startIndex,
+                endIndex: startIndex + block.text.length,
+              },
+              textStyle,
+              fields: fields.join(","),
+            },
+          });
+        }
+
+        insertedLength = text.length;
+        break;
+      }
+
+      case "link": {
+        if (!block.text || !block.url) break;
+        const text = `${block.text}\n`;
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex, endIndex: startIndex + block.text.length },
+            textStyle: { link: { url: block.url } },
+            fields: "link",
+          },
+        });
+        insertedLength = text.length;
+        break;
+      }
+
+      case "bullets":
+      case "numbered": {
+        if (!Array.isArray(block.items) || block.items.length === 0) break;
+        const text = block.items.map((item) => `${item}\n`).join("");
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
+        // Docs API bullet presets:
+        // - bullets: BULLET_DISC_CIRCLE_SQUARE (safe generic preset)
+        // - numbered: NUMBERED_DECIMAL_ALPHA_ROMAN (simple decimal sequence)
+        const bulletPreset =
+          block.type === "bullets"
+            ? "BULLET_DISC_CIRCLE_SQUARE"
+            : "NUMBERED_DECIMAL_ALPHA_ROMAN";
+        requests.push({
+          createParagraphBullets: {
+            range: {
+              startIndex,
+              endIndex: startIndex + text.length,
+            },
+            bulletPreset,
+          },
+        });
+        insertedLength = text.length;
+        break;
+      }
+
+      case "horizontalRule": {
+        requests.push({
+          insertHorizontalRule: { location: { index: startIndex } },
+        });
+        insertedLength = 1;
+        break;
+      }
+
+      case "spacer": {
+        const height = block.height || 12;
+        const newlines = Math.max(1, Math.floor(height / 12));
+        const text = "\n".repeat(newlines);
+        requests.push({
+          insertText: { location: { index: startIndex }, text },
+        });
+        insertedLength = text.length;
+        break;
+      }
 
       default:
         logger.warn({ blockType: block.type }, "Unknown block type");
         break;
     }
 
-    // Execute requests for this block
-    if (requests.length > 0) {
-      try {
-        await this.docs.documents.batchUpdate({
-          documentId,
-          requestBody: { requests },
-        });
-      } catch (batchUpdateError) {
-        // If this is an image block and it fails, try to recover by inserting text placeholder
-        if (block.type === "image") {
-          logger.warn(
-            {
-              documentId,
-              blockType: block.type,
-              error: batchUpdateError.message,
-            },
-            "Image insertion failed in batchUpdate, attempting text placeholder fallback"
-          );
-
-          try {
-            // Try to insert just a text placeholder
-            await this.docs.documents.batchUpdate({
-              documentId,
-              requestBody: {
-                requests: [
-                  {
-                    insertText: {
-                      location: { index: startIndex },
-                      text: "[Image could not be inserted]\n",
-                    },
-                  },
-                ],
-              },
-            });
-
-            return "[Image could not be inserted]\n".length;
-          } catch (fallbackError) {
-            logger.error(
-              {
-                documentId,
-                blockType: block.type,
-                originalError: batchUpdateError.message,
-                fallbackError: fallbackError.message,
-              },
-              "Both image insertion and text fallback failed, skipping block"
-            );
-
-            // Return 0 to indicate no content was inserted
-            return 0;
-          }
-        } else {
-          // For non-image blocks, re-throw the error as this indicates a more serious issue
-          throw batchUpdateError;
-        }
-      }
-    }
-
-    return insertedLength;
+    return { requests, insertedLength };
   }
 
   /**
