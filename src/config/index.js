@@ -51,6 +51,11 @@ const envSchema = Joi.object({
   // Tavily
   TAVILY_API_KEY: Joi.string().required(),
 
+  // Design assets (optional but required for design tools)
+  PEXELS_API_KEY: Joi.string().optional(),
+  NOUNPROJECT_API_KEY: Joi.string().optional(),
+  NOUNPROJECT_API_SECRET: Joi.string().optional(),
+
   // Application
   ADMIN_EMAIL: Joi.string().email().required(),
   FRONTEND_URL: Joi.string().uri().required(),
@@ -133,6 +138,13 @@ const appConfig = {
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     maxRequests: envVars.RATE_LIMIT_MAX_REQUESTS,
+  },
+  designAssets: {
+    pexelsApiKey: envVars.PEXELS_API_KEY,
+    nounProject: {
+      apiKey: envVars.NOUNPROJECT_API_KEY,
+      apiSecret: envVars.NOUNPROJECT_API_SECRET,
+    },
   },
 };
 

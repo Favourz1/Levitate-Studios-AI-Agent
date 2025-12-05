@@ -1,5 +1,5 @@
 const { z } = require("zod");
-const { SlideType } = require("@/constants");
+const { SlideType, DesignLayout } = require("@/constants");
 
 /**
  * Schema for TOC (Table of Contents) generation
@@ -184,6 +184,63 @@ const bigIdeaOptionsSchema = z.object({
     .describe("Exactly 2 distinct Big Idea options"),
 });
 
+/**
+ * Schema for design directives
+ * Used by Agent D (The Art Director) to generate actionable design specs
+ */
+const designDirectiveSchema = z.object({
+  layoutType: z.enum(Object.values(DesignLayout)),
+  colorPalette: z.object({
+    primary: z.string(),
+    secondary: z.string(),
+    accent: z.string(),
+    background: z.string(),
+    text: z.string(),
+  }),
+  typography: z.object({
+    headingFont: z.string(),
+    bodyFont: z.string(),
+    headingSize: z.number(),
+    bodySize: z.number(),
+  }),
+  visualElements: z.array(
+    z.object({
+      type: z.enum(["ICON", "IMAGE", "ILLUSTRATION", "CHART", "GRAPH"]),
+      description: z.string(),
+      url: z.string().url().optional(),
+      placement: z.enum([
+        "LEFT",
+        "RIGHT",
+        "TOP",
+        "BOTTOM",
+        "CENTER",
+        "BACKGROUND",
+      ]),
+      size: z.enum(["SMALL", "MEDIUM", "LARGE", "FULL_WIDTH"]),
+    })
+  ),
+  contentPlacement: z.object({
+    statsPosition: z.enum(["LEFT", "RIGHT", "TOP", "BOTTOM"]),
+    imagePosition: z.enum(["LEFT", "RIGHT", "TOP", "BOTTOM", "BACKGROUND"]),
+    textAlignment: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFY"]),
+    contentMapping: z
+      .array(
+        z.object({
+          contentSection: z.string(),
+          placement: z.enum(["LEFT", "RIGHT", "TOP", "BOTTOM", "CENTER"]),
+          visualElement: z.string().optional(),
+          emphasis: z.enum(["NORMAL", "HIGH", "LOW"]).default("NORMAL"),
+        })
+      )
+      .optional(),
+  }),
+  spacing: z.object({
+    sectionSpacing: z.number(),
+    elementSpacing: z.number(),
+  }),
+  specialInstructions: z.string().optional(),
+});
+
 module.exports = {
   tocGenerationSchema,
   regionExtractionSchema,
@@ -192,4 +249,5 @@ module.exports = {
   competitorListExtractionSchema,
   slideContentSchema,
   bigIdeaOptionsSchema,
+  designDirectiveSchema,
 };

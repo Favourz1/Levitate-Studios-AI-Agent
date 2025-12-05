@@ -12,6 +12,7 @@ const intentPromptService = require("@/services/intentPromptService");
 const workplanPlannerService = require("@/services/workplanPlannerService");
 const workplanResearcherService = require("@/services/workplanResearcherService");
 const workplanStrategistService = require("@/services/workplanStrategistService");
+const workplanArtDirectorService = require("@/services/workplanArtDirectorService");
 
 module.exports = {
   ...projectService,
@@ -28,4 +29,5 @@ module.exports = {
   ...workplanPlannerService,
   ...workplanResearcherService,
   ...workplanStrategistService,
+  ...workplanArtDirectorService,
 };

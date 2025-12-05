@@ -142,6 +142,36 @@ const BrandAssets = {
   },
 };
 
+// Levitate brand guidelines for design directives
+const LEVITATE_BRAND_GUIDELINES = {
+  colors: {
+    primary: "#1A1A1A",
+    secondary: "#FFFFFF",
+    accent: "#FF6B35",
+    background: "#F5F5F5",
+  },
+  typography: {
+    headingFont: "Inter Bold",
+    bodyFont: "Inter Regular",
+    headingSizes: [32, 24, 18],
+    bodySize: 14,
+  },
+  iconStyle: "Minimalist, line-based",
+  imageStyle: "High-quality, professional, authentic",
+};
+
+// Design layout types for workplan slides
+const DesignLayout = {
+  SPLIT_LEFT_RIGHT: "SPLIT_LEFT_RIGHT",
+  SPLIT_TOP_BOTTOM: "SPLIT_TOP_BOTTOM",
+  FULL_WIDTH: "FULL_WIDTH",
+  GRID_2COL: "GRID_2COL",
+  GRID_3COL: "GRID_3COL",
+  CENTERED: "CENTERED",
+  TIMELINE: "TIMELINE",
+  COMPARISON_TABLE: "COMPARISON_TABLE",
+};
+
 // Action Types for JWT tokens and email buttons
 const ActionType = {
   SEND_TO_CLIENT: "SEND_TO_CLIENT",
@@ -240,6 +270,8 @@ module.exports = {
   WebhookProvider,
   TeamRole,
   BrandAssets,
+  LEVITATE_BRAND_GUIDELINES,
+  DesignLayout,
   ActionType,
   AsanaPendingProjectsBoardSections,
   AsanaProjectBoardSections,

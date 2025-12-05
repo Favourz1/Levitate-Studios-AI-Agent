@@ -626,7 +626,7 @@
   - Import `tool` from `ai`, `z` from `zod`
   - Import `createLogger` from `@/utils/logger`
 
-- [ ] **Task 7.1.2**: Create `imageSearchTool` & `iconSearchTool`
+- [ ] **Task 7.1.2**: Create `imageSearchTool` and `iconSearchTool`
 
   - Description: "Search for relevant images/icons for slide design"
   - Parameters: `z.object({ query: z.string(), imageType: z.enum(["PHOTO", "ICON", "ILLUSTRATION"]), style: z.string().default("professional") })`
@@ -853,7 +853,7 @@ Here are the essential resources for the Pexels API:
 ## Phase 8: Agent E - The Document Builder (Google Docs Renderer)
 
 > **CRITICAL NOTE for Task 8.1:**  
-> When fixing or rebuilding the `createFormattedDocument` implementation and related Google Docs integration, you **must** review the detailed documentation and critical findings in [`@AI-Context/Third Party Docs/google_docs_formatted_doc_fixes.md`](../Third%20Party%20Docs/google_docs_formatted_doc_fixes.md).
+> When fixing or rebuilding the `createFormattedDocument` implementation and related Google Docs integration, you **must** review the detailed documentation and critical findings in [`@AI-Context/Third Party Docs/google_docs_formatted_doc_fixes.md`](../Third%20Party%20Docs/google_docs_formatted_doc_fixes.md). EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
 
 - **VISIT THE LINKS ONLINE** provided in that file for authoritative reference on Google Docs API requests and behavior, especially around `batchUpdate`.
 - **READ AND APPLY** the agent notes there:
