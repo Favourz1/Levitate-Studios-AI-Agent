@@ -31,6 +31,7 @@
   "license": "MIT",
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.17",
+    "@ai-sdk/groq": "^2.0.0",
     "@ai-sdk/openai": "^2.0.32",
     "@bull-board/api": "^6.12.7",
     "@bull-board/express": "^6.12.7",

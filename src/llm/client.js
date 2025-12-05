@@ -1,5 +1,6 @@
 const { createOpenAI } = require("@ai-sdk/openai");
 const { createAnthropic } = require("@ai-sdk/anthropic");
+const { createGroq } = require("@ai-sdk/groq");
 const { generateObject, generateText } = require("ai");
 const { appConfig } = require("@/config");
 const { LLMError } = require("@/utils/errors");
@@ -20,6 +21,12 @@ const LLM_MODELS = {
   // Anthropic models
   ANTHROPIC_CLAUDE: "claude-3-sonnet-20240229",
   ANTHROPIC_CLAUDE_HAIKU: "claude-3-haiku-20240307",
+
+  // Groq models
+  GROQ_LLAMA3_70B: "llama3-70b-8192",
+  GROQ_GEMMA2_9B: "gemma2-9b-it",
+  GROQ_OPENAI_120B: "openai/gpt-oss-120b",
+  GROQ_OPENAI_20B: "openai/gpt-oss-20b",
 };
 
 // Model routing based on task complexity and cost
@@ -70,6 +77,17 @@ class LLMClient {
         }
         return createAnthropic({
           apiKey: appConfig.llm.anthropicApiKey,
+        });
+      case "groq":
+        if (!appConfig.llm.groqApiKey) {
+          throw new LLMError(
+            "groq",
+            "initialization",
+            new Error("Groq API key not configured")
+          );
+        }
+        return createGroq({
+          apiKey: appConfig.llm.groqApiKey,
         });
       default:
         throw new LLMError(
@@ -249,7 +267,7 @@ class LLMClient {
     prompt,
     context,
     taskType = "generation",
-    maxTokens = 2000
+    maxTokens = 3000
   ) {
     const traceId = generateUuid();
     const startTime = Date.now();

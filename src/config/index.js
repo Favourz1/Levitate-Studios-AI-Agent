@@ -46,6 +46,7 @@ const envSchema = Joi.object({
   // LLM
   OPENAI_API_KEY: Joi.string().required(),
   ANTHROPIC_API_KEY: Joi.string().optional(),
+  GROQ_API_KEY: Joi.string().optional(),
 
   // Tavily
   TAVILY_API_KEY: Joi.string().required(),
@@ -121,6 +122,7 @@ const appConfig = {
   llm: {
     openaiApiKey: envVars.OPENAI_API_KEY,
     anthropicApiKey: envVars.ANTHROPIC_API_KEY,
+    groqApiKey: envVars.GROQ_API_KEY,
   },
   tavily: {
     apiKey: envVars.TAVILY_API_KEY,
