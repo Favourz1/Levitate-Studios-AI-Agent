@@ -111,10 +111,85 @@ const competitorListExtractionSchema = z.object({
     .describe("Brief explanation of how the competitors were determined"),
 });
 
+/**
+ * Schema for slide content synthesis
+ * Used by Agent C (The Strategist) to generate strategic slide copy
+ */
+const slideContentSchema = z.object({
+  contentCopy: z
+    .string()
+    .min(100)
+    .describe(
+      "The complete synthesized strategic copy for the slide. This is the final content that will be placed on the slide, ready for design execution. Must be comprehensive, strategic, and actionable."
+    ),
+  keyPoints: z
+    .array(z.string())
+    .describe(
+      "Array of key strategic points or takeaways from the content. These serve as highlights or bullet points."
+    ),
+  dataPoints: z
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Structured data points extracted from research (e.g., statistics, numbers, metrics). Format is flexible based on slide type."
+    ),
+  sourceCitations: z
+    .array(z.string())
+    .describe(
+      "Array of source citations or references from the research data. Format: ['Source Title - URL', ...]"
+    ),
+  qualityScore: z
+    .number()
+    .min(0)
+    .max(10)
+    .describe(
+      "Overall quality score for the synthesized content (0-10). Consider strategic coherence, research integration, clarity, and actionability."
+    ),
+});
+
+/**
+ * Schema for Big Idea options generation
+ * Used by Agent C (The Strategist) for BIG_IDEA slide
+ */
+const bigIdeaOptionsSchema = z.object({
+  options: z
+    .array(
+      z.object({
+        optionNumber: z
+          .number()
+          .int()
+          .positive()
+          .describe("Option number (1 or 2)"),
+        bigIdeaText: z
+          .string()
+          .describe(
+            "The Big Idea statement - a memorable, actionable pillar for all marketing messages"
+          ),
+        rationale: z
+          .string()
+          .describe(
+            "Strategic rationale explaining why this Big Idea is strong and how it addresses the strategic context"
+          ),
+        strategicFitScore: z
+          .number()
+          .min(0)
+          .max(10)
+          .describe(
+            "Strategic fit score (0-10) indicating how well this Big Idea aligns with the brand, market, and objectives"
+          ),
+      })
+    )
+    .length(2)
+    .describe("Exactly 2 distinct Big Idea options"),
+});
+
 module.exports = {
   tocGenerationSchema,
   regionExtractionSchema,
   industryExtractionSchema,
   targetAudienceExtractionSchema,
   competitorListExtractionSchema,
+  slideContentSchema,
+  bigIdeaOptionsSchema,
 };
