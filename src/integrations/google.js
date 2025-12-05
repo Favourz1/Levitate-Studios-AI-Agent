@@ -500,14 +500,6 @@ class GoogleIntegration {
 
           const documentId = doc.data.documentId;
 
-          logger.info(
-            {
-              documentId,
-              title: sanitizedTitle,
-            },
-            "Google Document created successfully"
-          );
-
           // Step 2: Process blocks and create formatted content
           if (blocks.length > 0) {
             await this.processDocumentBlocks(documentId, blocks);
@@ -1183,9 +1175,43 @@ class GoogleIntegration {
       }
 
       case "horizontalRule": {
+        // "insertHorizontalRule" does not exist in the REST API.
+        // We simulate it by inserting a newline and applying a bottom border to it.
+
+        // 1. Insert the newline that will hold the border
         requests.push({
-          insertHorizontalRule: { location: { index: startIndex } },
+          insertText: {
+            location: { index: startIndex },
+            text: "\n",
+          },
         });
+
+        // 2. Apply a border to the paragraph we just inserted
+        requests.push({
+          updateParagraphStyle: {
+            range: {
+              startIndex: startIndex,
+              endIndex: startIndex + 1,
+            },
+            paragraphStyle: {
+              borderBottom: {
+                color: {
+                  color: {
+                    // The extra 'color' nesting is required here
+                    rgbColor: { red: 0.8, green: 0.8, blue: 0.8 }, // Light grey line
+                  },
+                },
+                width: {
+                  magnitude: 1,
+                  unit: "PT",
+                },
+                dashStyle: "SOLID",
+              },
+            },
+            fields: "borderBottom",
+          },
+        });
+
         insertedLength = 1;
         break;
       }
