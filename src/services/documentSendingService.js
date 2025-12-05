@@ -252,6 +252,32 @@ class DocumentSendingService {
           },
           "PDF shared with client"
         );
+
+        // Make PDF publicly readable so clients with non-Gmail emails can access it
+        try {
+          await googleIntegration.makeDocumentPublicReadable(pdfFile.id);
+          logger.info(
+            {
+              documentId,
+              pdfFileId: pdfFile.id,
+              clientEmail: result.client.primaryEmail,
+              correlationId,
+            },
+            "PDF made publicly readable for client access"
+          );
+        } catch (publicError) {
+          // Log warning but don't fail - sharing with client email should still work
+          logger.warn(
+            {
+              documentId,
+              pdfFileId: pdfFile.id,
+              clientEmail: result.client.primaryEmail,
+              error: publicError.message,
+              correlationId,
+            },
+            "Failed to make PDF publicly readable, but document is still shared with client email"
+          );
+        }
       } catch (pdfError) {
         logger.error(
           {
