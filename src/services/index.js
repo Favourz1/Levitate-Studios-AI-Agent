@@ -13,6 +13,7 @@ const workplanPlannerService = require("@/services/workplanPlannerService");
 const workplanResearcherService = require("@/services/workplanResearcherService");
 const workplanStrategistService = require("@/services/workplanStrategistService");
 const workplanArtDirectorService = require("@/services/workplanArtDirectorService");
+const workplanDocumentBuilderService = require("@/services/workplanDocumentBuilderService");
 
 module.exports = {
   ...projectService,
@@ -30,4 +31,5 @@ module.exports = {
   ...workplanResearcherService,
   ...workplanStrategistService,
   ...workplanArtDirectorService,
+  ...workplanDocumentBuilderService,
 };

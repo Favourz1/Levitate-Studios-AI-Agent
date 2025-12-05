@@ -853,7 +853,9 @@ Here are the essential resources for the Pexels API:
 ## Phase 8: Agent E - The Document Builder (Google Docs Renderer)
 
 > **CRITICAL NOTE for Task 8.1:**  
-> When fixing or rebuilding the `createFormattedDocument` implementation and related Google Docs integration, you **must** review the detailed documentation and critical findings in [`@AI-Context/Third Party Docs/google_docs_formatted_doc_fixes.md`](../Third%20Party%20Docs/google_docs_formatted_doc_fixes.md). EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
+> When fixing or rebuilding the `createFormattedDocument` implementation and related Google Docs integration, you **must** review the detailed documentation and critical findings in [`@AI-Context/Third Party Docs/google_docs_formatted_doc_fixes.md`](../Third%20Party%20Docs/google_docs_formatted_doc_fixes.md). - GO ONLINE AND BROWSE ALL LINKS IN `@AI-Context/Third Party Docs/google_docs_formatted_doc_fixes.md` TO GET MORE INFORMATION .
+
+EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
 
 - **VISIT THE LINKS ONLINE** provided in that file for authoritative reference on Google Docs API requests and behavior, especially around `batchUpdate`.
 - **READ AND APPLY** the agent notes there:

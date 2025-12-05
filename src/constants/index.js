@@ -133,9 +133,9 @@ const TeamRole = {
 
 // Brand Assets
 const BrandAssets = {
-  LEVITATE_LOGO_FILE_ID: "1UXsLtQ0HemLj7aHjssGu_ipp4mRBj0Hc", // Google Drive file ID for logo
+  LEVITATE_LOGO_FILE_ID: "1_QMmI4uJVrmOISru8027mE0hOaGuYI6O", // Google Drive file ID for logo
   LEVITATE_LOGO_URL:
-    "https://levitate.ng/wp-content/uploads/2022/02/Group-1.svg", // Fallback URL
+    "https://levitate.ng/wp-content/uploads/2022/02/Group-1.svg", // Fallback URL Note: Svg doesnt work only png, jpg and jpeg
   LOGO_DIMENSIONS: {
     WIDTH: 125, // pixels
     HEIGHT: 32, // pixels
