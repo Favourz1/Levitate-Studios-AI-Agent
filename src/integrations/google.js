@@ -152,7 +152,11 @@ class GoogleIntegration {
   // Create a new Google Doc
   async createDocument(title, content, options = {}) {
     const startTime = Date.now();
-    const { folderId = null, makePublicReadable = false } = options;
+    const {
+      folderId = null,
+      makePublicReadable = false,
+      shareWithEmails = [],
+    } = options;
 
     try {
       // Verify authentication first
@@ -184,6 +188,7 @@ class GoogleIntegration {
               hasContent: !!content,
               contentLength: content?.length || 0,
               folderId,
+              shareWithEmailsCount: shareWithEmails.length,
             },
             "Creating Google Document"
           );
@@ -303,6 +308,29 @@ class GoogleIntegration {
               },
               "Failed to share document with admin, but document created successfully"
             );
+          }
+
+          // Share with additional emails if provided
+          if (shareWithEmails.length > 0) {
+            try {
+              const recipients = shareWithEmails.map((email) => ({
+                email: typeof email === "string" ? email : email.email,
+                role:
+                  typeof email === "string" ? "reader" : email.role || "reader",
+                options: typeof email === "string" ? {} : email.options || {},
+              }));
+
+              await this.shareDocument(documentId, recipients);
+            } catch (shareError) {
+              // Log warning but don't fail the creation
+              logger.warn(
+                {
+                  documentId,
+                  error: shareError.message,
+                },
+                "Failed to share document with additional emails, but document created successfully"
+              );
+            }
           }
 
           // Make publicly readable if requested
