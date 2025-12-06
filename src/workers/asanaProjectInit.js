@@ -221,7 +221,6 @@ const asanaProjectInitProcessor = async (job) => {
           where: { id: existingLink.id },
           data: {
             sections: sections,
-            updatedAt: new Date(),
           },
         });
       } else {
