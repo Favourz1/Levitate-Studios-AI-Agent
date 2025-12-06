@@ -14,20 +14,21 @@ require("dotenv").config();
 // Import Tavily integration (may fail if API key is missing)
 let tavilyIntegration, TavilyIntegration;
 try {
-  const tavilyModule = require("../src/integrations/tavily");
+  const tavilyModule = require("../../src/integrations/tavily");
   tavilyIntegration = tavilyModule.tavilyIntegration;
   TavilyIntegration = tavilyModule.TavilyIntegration;
 } catch (error) {
   // Handle case where singleton fails to initialize (missing API key)
   if (error.message.includes("Tavily API key")) {
-    TavilyIntegration = require("../src/integrations/tavily").TavilyIntegration;
+    TavilyIntegration =
+      require("../../src/integrations/tavily").TavilyIntegration;
     tavilyIntegration = null; // Will be set later if API key becomes available
   } else {
     throw error;
   }
 }
 
-const { TavilyError } = require("../src/utils/errors");
+const { TavilyError } = require("../../src/utils/errors");
 
 // ANSI color codes for terminal output
 const colors = {
