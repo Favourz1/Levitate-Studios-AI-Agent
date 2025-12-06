@@ -153,8 +153,9 @@ class WorkplanArtDirectorService {
           type: "IMAGE",
           description: image.description || "Supporting image",
           url: image.url,
-          placement: layoutType === "SPLIT_LEFT_RIGHT" ? "RIGHT" : "TOP",
-          size: layoutType === "CENTERED" ? "MEDIUM" : "LARGE",
+          placement:
+            layoutType === DesignLayout.SPLIT_LEFT_RIGHT ? "RIGHT" : "TOP",
+          size: layoutType === DesignLayout.CENTERED ? "MEDIUM" : "LARGE",
         })),
         ...iconResults.slice(0, 3).map((icon) => ({
           type: "ICON",

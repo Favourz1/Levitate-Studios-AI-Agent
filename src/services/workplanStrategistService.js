@@ -3,7 +3,8 @@ const { createLogger } = require("@/utils/logger");
 const { llmClient } = require("@/llm/client");
 const {
   SlideType,
-  DocumentStatus,
+  SlideStatus,
+  WorkplanServiceTypeFallback,
   SystemActors,
   AuditActions,
 } = require("@/constants");
@@ -60,7 +61,7 @@ class WorkplanStrategistService {
       await prisma.workplanSlide.update({
         where: { id: slideData.id },
         data: {
-          contentStatus: "GENERATING",
+          contentStatus: SlideStatus.GENERATING,
           updatedAt: new Date(),
         },
       });
@@ -78,7 +79,7 @@ class WorkplanStrategistService {
           { projectId: context.project.id },
           "Service type not in context, using default"
         );
-        context.serviceType = "GENERAL";
+        context.serviceType = WorkplanServiceTypeFallback.GENERAL;
       }
 
       // Generate system prompt following BRICS framework
@@ -118,7 +119,7 @@ class WorkplanStrategistService {
         data: {
           contentCopy: synthesizedContent.contentCopy,
           dataPoints: synthesizedContent.dataPoints || null,
-          contentStatus: "COMPLETED",
+          contentStatus: SlideStatus.COMPLETED,
           qualityScore:
             finalQualityScore !== null
               ? parseFloat(finalQualityScore.toFixed(2))
@@ -188,7 +189,7 @@ class WorkplanStrategistService {
         await prisma.workplanSlide.update({
           where: { id: slideId },
           data: {
-            contentStatus: "FAILED",
+            contentStatus: SlideStatus.FAILED,
             updatedAt: new Date(),
           },
         });

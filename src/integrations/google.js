@@ -5,6 +5,7 @@ const { GoogleError } = require("@/utils/errors");
 const { createLogger, logIntegrationCall } = require("@/utils/logger");
 const { retry } = require("@/utils");
 const { getConfig, setConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
+const { BlockType } = require("@/constants");
 const { Readable } = require("stream");
 
 const logger = createLogger("integration:google");
@@ -709,7 +710,7 @@ class GoogleIntegration {
         if (!block || !block.type) continue;
 
         // --- SPECIAL HANDLING FOR TABLES ---
-        if (block.type === "table") {
+        if (block.type === BlockType.TABLE) {
           // 1. Flush any pending text blocks first
           if (currentBatch.length > 0) {
             await this.docs.documents.batchUpdate({
@@ -923,7 +924,7 @@ class GoogleIntegration {
     let insertedLength = 0;
 
     switch (block.type) {
-      case "image": {
+      case BlockType.IMAGE: {
         if (!(block.url || block.fileId)) break;
 
         let imageUrl = block.url;
@@ -981,7 +982,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "heading": {
+      case BlockType.HEADING: {
         if (!block.text) break;
         const text = `${block.text}\n`;
         requests.push({
@@ -1006,7 +1007,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "paragraph": {
+      case BlockType.PARAGRAPH: {
         if (!block.text) break;
         const text = `${block.text}\n`;
         requests.push({
@@ -1059,7 +1060,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "styled": {
+      case BlockType.STYLED: {
         if (!block.text || !block.style) break;
         const text = `${block.text}\n`;
         requests.push({
@@ -1130,7 +1131,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "link": {
+      case BlockType.LINK: {
         if (!block.text || !block.url) break;
         const text = `${block.text}\n`;
         requests.push({
@@ -1147,8 +1148,8 @@ class GoogleIntegration {
         break;
       }
 
-      case "bullets":
-      case "numbered": {
+      case BlockType.BULLETS:
+      case BlockType.NUMBERED: {
         if (!Array.isArray(block.items) || block.items.length === 0) break;
         const text = block.items.map((item) => `${item}\n`).join("");
         requests.push({
@@ -1158,7 +1159,7 @@ class GoogleIntegration {
         // - bullets: BULLET_DISC_CIRCLE_SQUARE (safe generic preset)
         // - numbered: NUMBERED_DECIMAL_ALPHA_ROMAN (simple decimal sequence)
         const bulletPreset =
-          block.type === "bullets"
+          block.type === BlockType.BULLETS
             ? "BULLET_DISC_CIRCLE_SQUARE"
             : "NUMBERED_DECIMAL_ALPHA_ROMAN";
         requests.push({
@@ -1174,7 +1175,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "horizontalRule": {
+      case BlockType.HORIZONTAL_RULE: {
         // "insertHorizontalRule" does not exist in the REST API.
         // We simulate it by inserting a newline and applying a bottom border to it.
 
@@ -1216,7 +1217,7 @@ class GoogleIntegration {
         break;
       }
 
-      case "spacer": {
+      case BlockType.SPACER: {
         const height = block.height || 12;
         const newlines = Math.max(1, Math.floor(height / 12));
         const text = "\n".repeat(newlines);
@@ -1412,7 +1413,7 @@ class GoogleIntegration {
 
           for (const block of formattedBlocks) {
             switch (block.type) {
-              case "paragraph":
+              case BlockType.PARAGRAPH:
                 requests.push({
                   insertText: {
                     location: { index: currentIndex },
@@ -1422,7 +1423,7 @@ class GoogleIntegration {
                 currentIndex += block.text.length + 2;
                 break;
 
-              case "heading":
+              case BlockType.HEADING:
                 requests.push({
                   insertText: {
                     location: { index: currentIndex },
@@ -1462,7 +1463,7 @@ class GoogleIntegration {
                 currentIndex += block.text.length + 2;
                 break;
 
-              case "styled":
+              case BlockType.STYLED:
                 requests.push({
                   insertText: {
                     location: { index: currentIndex },
@@ -1490,7 +1491,7 @@ class GoogleIntegration {
                 currentIndex += block.text.length + 2;
                 break;
 
-              case "spacer":
+              case BlockType.SPACER:
                 // Add empty lines for spacing
                 const spacerLines = Math.max(
                   1,
@@ -1506,7 +1507,7 @@ class GoogleIntegration {
                 currentIndex += spacerText.length;
                 break;
 
-              case "bullets":
+              case BlockType.BULLETS:
                 for (const item of block.items) {
                   requests.push({
                     insertText: {
@@ -1525,7 +1526,7 @@ class GoogleIntegration {
                 currentIndex += 1;
                 break;
 
-              case "numbered":
+              case BlockType.NUMBERED:
                 for (let i = 0; i < block.items.length; i++) {
                   const item = block.items[i];
                   requests.push({

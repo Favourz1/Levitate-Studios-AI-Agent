@@ -9,6 +9,7 @@ const {
   DocumentType,
   DocumentStatus,
   ProjectPhase,
+  ProcessingStatus,
   AuditActions,
   SystemActors,
   CreatedBy,
@@ -702,7 +703,7 @@ const updateQuoteProcessor = async (job) => {
           include: {
             client: true,
             questionnaireResponses: {
-              where: { processingStatus: "PROCESSED" },
+              where: { processingStatus: ProcessingStatus.PROCESSED },
               orderBy: { submittedAt: "desc" },
               take: 1,
             },

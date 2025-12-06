@@ -257,13 +257,92 @@ const SystemEmails = {
   AI_AGENT: "ai-agent@levitate.ng",
 };
 
+// Slide Status Constants (used for workplan slides)
+// Note: These use the same values as ResearchStatus and DocumentStatus for consistency
+const SlideStatus = {
+  PENDING: "PENDING",
+  RESEARCHING: "RESEARCHING",
+  GENERATING: "GENERATING",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+};
+
+// Google Docs Block Types
+const BlockType = {
+  IMAGE: "image",
+  HEADING: "heading",
+  PARAGRAPH: "paragraph",
+  STYLED: "styled",
+  LINK: "link",
+  BULLETS: "bullets",
+  NUMBERED: "numbered",
+  HORIZONTAL_RULE: "horizontalRule",
+  SPACER: "spacer",
+  TABLE: "table",
+};
+
+// LLM Task Types
+const LLMTaskType = {
+  CLASSIFICATION: "classification",
+  EXTRACTION: "extraction",
+  GENERATION: "generation",
+  PLANNING: "planning",
+};
+
+// LLM Provider Names
+const LLMProvider = {
+  OPENAI: "openai",
+  ANTHROPIC: "anthropic",
+  GROQ: "groq",
+};
+
+// Research Data Types
+const ResearchDataType = {
+  GROWTH_RATE: "GROWTH_RATE",
+  MARKET_SIZE: "MARKET_SIZE",
+  POPULATION: "POPULATION",
+  BEHAVIOR: "BEHAVIOR",
+};
+
+// Job Types for LLM Tools
+const JobType = {
+  DOCUMENT_GENERATION: "document-generation",
+  EMAIL_PARSE: "email-parse",
+  ASANA_SYNC: "asana-sync",
+  ASANA_PROJECT_INIT: "asana-project-init",
+  NOTIFICATION: "notification",
+  SNAPSHOT_SYNC: "snapshot-sync",
+};
+
+// Document Type Display Names (for UI/emails)
+const DocumentTypeDisplayName = {
+  BRAND_ORIGIN: "Brand Origin",
+  QUOTE: "Quote",
+  QUOTE_VARIANT: "Quote Variant",
+  WORKPLAN: "Workplan",
+};
+
+// Reply-to Address Pattern
+const ReplyToAddressPattern = {
+  PREFIX: "clients-",
+  DOMAIN_PLACEHOLDER: "@{domain}",
+  // Pattern: clients-{clientId}-{projectId}@{domain}
+};
+
+// Workplan Service Type Fallback
+const WorkplanServiceTypeFallback = {
+  GENERAL: "GENERAL",
+};
+
 module.exports = {
   ProjectPhase,
   DocumentType,
   DocumentStatus,
   WorkplanServiceType,
+  WorkplanServiceTypeFallback,
   SlideType,
   ResearchStatus,
+  SlideStatus,
   EmailDirection,
   EmailIntent,
   Actor,
@@ -282,4 +361,11 @@ module.exports = {
   SystemActors,
   AuditActions,
   SystemEmails,
+  BlockType,
+  LLMTaskType,
+  LLMProvider,
+  ResearchDataType,
+  JobType,
+  DocumentTypeDisplayName,
+  ReplyToAddressPattern,
 };

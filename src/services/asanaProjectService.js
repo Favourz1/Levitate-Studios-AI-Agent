@@ -2,7 +2,12 @@ const { getPrismaClient } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError } = require("@/utils/errors");
 const { llmClient } = require("@/llm/client");
-const { DocumentType } = require("@/constants");
+const {
+  DocumentType,
+  ProcessingStatus,
+  DocumentStatus,
+  LLMTaskType,
+} = require("@/constants");
 const { googleIntegration } = require("@/integrations/google");
 
 const logger = createLogger("service:asana-project");
@@ -35,7 +40,7 @@ class AsanaProjectService {
           client: true,
           questionnaireResponses: {
             where: {
-              processingStatus: "PROCESSED",
+              processingStatus: ProcessingStatus.PROCESSED,
             },
             orderBy: {
               submittedAt: "desc",
@@ -45,7 +50,7 @@ class AsanaProjectService {
           documents: {
             where: {
               type: DocumentType.BRAND_ORIGIN,
-              status: "ACCEPTED",
+              status: DocumentStatus.ACCEPTED,
             },
             include: {
               currentRevision: true,
@@ -109,7 +114,7 @@ class AsanaProjectService {
       const conversationText = conversations
         .map((email) => {
           const direction =
-            email.direction === "INBOUND" ? "Client" : "Levitate";
+            email.direction === EmailDirection.INBOUND ? "Client" : "Levitate";
           const date = new Date(email.receivedAt).toLocaleDateString();
           const content = email.textBody || email.subject || "";
           return `[${date}] ${direction}: ${content}`;
@@ -226,10 +231,15 @@ Generate a well-structured, professional project description that will be used i
 Generate the complete project description now, formatted for Asana project notes. Make it professional, clear, and actionable for the creative team.`;
 
       // Call LLM to generate description
-      const result = await llmClient.generateText(prompt, {
-        projectId,
-        task: "project_description_generation",
-      });
+      const result = await llmClient.generateText(
+        prompt,
+        {
+          projectId,
+          task: "project_description_generation",
+        },
+        LLMTaskType.GENERATION,
+        4000
+      );
 
       let description = result.text || result;
 

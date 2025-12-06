@@ -8,7 +8,12 @@ const { QueueService } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ValidationError } = require("@/utils/errors");
 const { generateDedupeKey } = require("@/utils");
-const { DocumentStatus, ProjectPhase, DocumentType } = require("@/constants");
+const {
+  DocumentStatus,
+  ProjectPhase,
+  DocumentType,
+  JobType,
+} = require("@/constants");
 
 const logger = createLogger("llm:tools");
 const prisma = getPrismaClient();
@@ -523,37 +528,37 @@ const enqueueJobTool = tool({
       );
 
       switch (jobType) {
-        case "document-generation":
+        case JobType.DOCUMENT_GENERATION:
           job = await QueueService.addDocumentGenerationJob(
             { ...jobData, dedupeKey },
             priority
           );
           break;
-        case "email-parse":
+        case JobType.EMAIL_PARSE:
           job = await QueueService.addEmailParseJob(
             { ...jobData, dedupeKey },
             priority
           );
           break;
-        case "asana-sync":
+        case JobType.ASANA_SYNC:
           job = await QueueService.addAsanaSyncJob(
             { ...jobData, dedupeKey },
             priority
           );
           break;
-        case "asana-project-init":
+        case JobType.ASANA_PROJECT_INIT:
           job = await QueueService.addAsanaProjectInitJob(
             { ...jobData, dedupeKey },
             priority
           );
           break;
-        case "notification":
+        case JobType.NOTIFICATION:
           job = await QueueService.addNotificationJob(
             { ...jobData, dedupeKey },
             priority
           );
           break;
-        case "snapshot-sync":
+        case JobType.SNAPSHOT_SYNC:
           job = await QueueService.addSnapshotSyncJob(
             { ...jobData, dedupeKey },
             priority

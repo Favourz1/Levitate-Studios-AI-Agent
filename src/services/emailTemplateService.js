@@ -1,5 +1,9 @@
 const { appConfig } = require("@/config");
-const { DocumentType } = require("@/constants");
+const {
+  DocumentType,
+  DocumentTypeDisplayName,
+  EmailDirection,
+} = require("@/constants");
 const { createLogger } = require("@/utils/logger");
 
 const logger = createLogger("service:email-template");
@@ -296,7 +300,9 @@ class EmailTemplateService {
   static generateDocumentReviewTemplate(document, project, documentType) {
     try {
       const documentTypeName =
-        documentType === "brand_origin" ? "Brand Origin" : "Quote";
+        documentType === DocumentType.BRAND_ORIGIN.toLowerCase()
+          ? DocumentTypeDisplayName.BRAND_ORIGIN
+          : DocumentTypeDisplayName.QUOTE;
       const subject = `${documentTypeName} Document Ready for Review: ${project.name}`;
 
       const htmlContent = `
@@ -1063,7 +1069,9 @@ class EmailTemplateService {
   static generateDocumentAcceptanceTemplate(document, project, documentType) {
     try {
       const documentTypeName =
-        documentType === "brand_origin" ? "Brand Origin" : "Quote";
+        documentType === DocumentType.BRAND_ORIGIN.toLowerCase()
+          ? DocumentTypeDisplayName.BRAND_ORIGIN
+          : DocumentTypeDisplayName.QUOTE;
       const nextAction =
         documentType === "brand_origin"
           ? "create Quote document"
@@ -1231,7 +1239,9 @@ class EmailTemplateService {
   ) {
     try {
       const documentTypeName =
-        document.type === "BRAND_ORIGIN" ? "Brand Origin" : "Quote";
+        document.type === DocumentType.BRAND_ORIGIN
+          ? DocumentTypeDisplayName.BRAND_ORIGIN
+          : DocumentTypeDisplayName.QUOTE;
       const subject = `${documentTypeName} Document - ${project.name}`;
 
       const htmlContent = `
@@ -1734,9 +1744,12 @@ class EmailTemplateService {
               }
             );
 
-            const directionIcon = email.direction === "OUTBOUND" ? "📤" : "📥";
+            const directionIcon =
+              email.direction === EmailDirection.OUTBOUND ? "📤" : "📥";
             const directionColor =
-              email.direction === "OUTBOUND" ? "#28a745" : "#007bff";
+              email.direction === EmailDirection.OUTBOUND
+                ? "#28a745"
+                : "#007bff";
 
             // Truncate long email content for readability and handle null/undefined safely
             const truncatedContent =

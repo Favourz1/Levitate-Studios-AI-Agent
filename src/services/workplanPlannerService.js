@@ -2,6 +2,7 @@ const { getPrismaClient } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const {
   WorkplanServiceType,
+  WorkplanServiceTypeFallback,
   SlideType,
   DocumentType,
   DocumentStatus,
@@ -147,7 +148,7 @@ class WorkplanPlannerService {
         "Failed to get service type"
       );
       // Return fallback on error
-      return "GENERAL";
+      return WorkplanServiceTypeFallback.GENERAL;
     }
   }
 
@@ -159,7 +160,7 @@ class WorkplanPlannerService {
   static getHighestRatedServiceType(serviceMatches) {
     if (!Array.isArray(serviceMatches) || serviceMatches.length === 0) {
       logger.warn("Empty service matches array, returning GENERAL");
-      return "GENERAL";
+      return WorkplanServiceTypeFallback.GENERAL;
     }
 
     // Sort by rating descending
@@ -179,7 +180,7 @@ class WorkplanPlannerService {
       { topRating: topMatch.rating },
       "Top match rating < 5, returning GENERAL"
     );
-    return "GENERAL";
+    return WorkplanServiceTypeFallback.GENERAL;
   }
 
   /**
@@ -412,7 +413,7 @@ Return an array of service matches with:
           z.object({
             serviceType: z.enum([
               ...Object.values(WorkplanServiceType),
-              "GENERAL",
+              WorkplanServiceTypeFallback.GENERAL,
             ]),
             rating: z
               .number()
@@ -448,7 +449,7 @@ Return an array of service matches with:
         );
         return [
           {
-            serviceType: "GENERAL",
+            serviceType: WorkplanServiceTypeFallback.GENERAL,
             rating: 0,
             reasoning: "No service matches returned from LLM",
           },
@@ -475,7 +476,7 @@ Return an array of service matches with:
       // Return fallback on error
       return [
         {
-          serviceType: "GENERAL",
+          serviceType: WorkplanServiceTypeFallback.GENERAL,
           rating: 0,
           reasoning: `Error: ${error.message}`,
         },

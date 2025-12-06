@@ -6,13 +6,14 @@ const { appConfig } = require("@/config");
 const { LLMError } = require("@/utils/errors");
 const { createLogger, logLLMCall } = require("@/utils/logger");
 const { generateUuid } = require("@/utils");
+const { LLMTaskType, LLMProvider } = require("@/constants");
 
 const logger = createLogger("llm:client");
 
 // LLM Configuration
 const LLM_MODELS = {
   // OpenAI models - Only models that support structured output
-  OPENAI_GPT4O: "gpt-4o",
+  OPENAI_GPT4O: "gpt-4o", // Supports structured output
   OPENAI_GPT4_TURBO: "gpt-4-turbo-preview",
   OPENAI_GPT35_TURBO: "gpt-3.5-turbo",
   OPENAI_GPT4O_MINI: "gpt-4o-mini", // Supports structured output
@@ -33,22 +34,22 @@ const LLM_MODELS = {
 // Note: Only use models that support structured output for generateObject calls
 const getModelForTask = (taskType) => {
   switch (taskType) {
-    case "classification":
-    case "extraction":
+    case LLMTaskType.CLASSIFICATION:
+    case LLMTaskType.EXTRACTION:
       // Use gpt-4o-mini for structured tasks (supports object generation)
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
+      return { provider: LLMProvider.OPENAI, model: LLM_MODELS.OPENAI_GPT4O };
 
-    case "generation":
+    case LLMTaskType.GENERATION:
       // Use gpt-4-turbo for content generation
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
-    // return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4_TURBO };
+      return { provider: LLMProvider.OPENAI, model: LLM_MODELS.OPENAI_GPT4O };
+    // return { provider: LLMProvider.OPENAI, model: LLM_MODELS.OPENAI_GPT4_TURBO };
 
-    case "planning":
+    case LLMTaskType.PLANNING:
       // Use gpt-4o-mini for planning with structured output
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
+      return { provider: LLMProvider.OPENAI, model: LLM_MODELS.OPENAI_GPT4O };
 
     default:
-      return { provider: "openai", model: LLM_MODELS.OPENAI_GPT4O };
+      return { provider: LLMProvider.OPENAI, model: LLM_MODELS.OPENAI_GPT4O };
   }
 };
 
@@ -56,7 +57,7 @@ const getModelForTask = (taskType) => {
 class LLMClient {
   getProvider(provider) {
     switch (provider) {
-      case "openai":
+      case LLMProvider.OPENAI:
         if (!appConfig.llm.openaiApiKey) {
           throw new LLMError(
             "openai",
@@ -67,7 +68,7 @@ class LLMClient {
         return createOpenAI({
           apiKey: appConfig.llm.openaiApiKey,
         });
-      case "anthropic":
+      case LLMProvider.ANTHROPIC:
         if (!appConfig.llm.anthropicApiKey) {
           throw new LLMError(
             "anthropic",
@@ -78,7 +79,7 @@ class LLMClient {
         return createAnthropic({
           apiKey: appConfig.llm.anthropicApiKey,
         });
-      case "groq":
+      case LLMProvider.GROQ:
         if (!appConfig.llm.groqApiKey) {
           throw new LLMError(
             "groq",
@@ -408,22 +409,22 @@ Context: ${
     }`;
 
     switch (taskType) {
-      case "classification":
+      case LLMTaskType.CLASSIFICATION:
         return `${basePrompt}
 
 Your task is to classify and categorize information accurately. Be precise and consistent in your classifications. Always follow the provided schema exactly.`;
 
-      case "extraction":
+      case LLMTaskType.EXTRACTION:
         return `${basePrompt}
 
 Your task is to extract specific information from the provided text. Be accurate and complete in your extraction. If information is not available, use null or appropriate default values as specified in the schema.`;
 
-      case "generation":
+      case LLMTaskType.GENERATION:
         return `${basePrompt}
 
 Your task is to generate creative, professional content for client projects. Consider the client's brand, target audience, and project requirements. Be creative while maintaining professionalism and brand consistency.`;
 
-      case "planning":
+      case LLMTaskType.PLANNING:
         return `${basePrompt}
 
 Your task is to analyze complex situations and create detailed plans. Break down complex tasks into manageable steps, consider dependencies, and provide clear reasoning for your decisions.`;

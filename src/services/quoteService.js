@@ -11,7 +11,11 @@ const { QuotePromptService } = require("@/services/quotePromptService");
 const { erpIntegration } = require("@/integrations/levitateStudiosErp");
 const { googleIntegration } = require("@/integrations/google");
 const { getConfig, CONFIG_KEYS } = require("@/utils/globalConfig");
-const { DocumentType } = require("@/constants");
+const {
+  DocumentType,
+  ProcessingStatus,
+  DocumentStatus,
+} = require("@/constants");
 
 const logger = createLogger("service:quote");
 const prisma = getPrismaClient();
@@ -43,7 +47,7 @@ class QuoteService {
           client: true,
           questionnaireResponses: {
             where: {
-              processingStatus: "PROCESSED",
+              processingStatus: ProcessingStatus.PROCESSED,
             },
             orderBy: {
               submittedAt: "desc",
@@ -53,7 +57,7 @@ class QuoteService {
           documents: {
             where: {
               type: DocumentType.BRAND_ORIGIN,
-              status: "ACCEPTED",
+              status: DocumentStatus.ACCEPTED,
             },
             include: {
               currentRevision: true,

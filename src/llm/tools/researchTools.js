@@ -1,7 +1,7 @@
 const { tool } = require("ai");
 const { z } = require("zod");
 const { tavilyIntegration } = require("@/integrations/tavily");
-const { SlideType } = require("@/constants");
+const { SlideType, ResearchDataType } = require("@/constants");
 const { createLogger } = require("@/utils/logger");
 
 const logger = createLogger("llm:tools:research");
@@ -17,7 +17,9 @@ const competitorAnalysisTool = tool({
     competitorNames: z
       .array(z.string())
       .describe("Array of competitor company names to research"),
-    industry: z.string().describe("Industry or sector the competitors operate in"),
+    industry: z
+      .string()
+      .describe("Industry or sector the competitors operate in"),
     slideType: z
       .enum(Object.values(SlideType))
       .describe("Type of slide this research is for"),
@@ -26,7 +28,12 @@ const competitorAnalysisTool = tool({
       .optional()
       .describe("Target region/market (e.g., 'Nigeria', 'West Africa')"),
   }),
-  execute: async ({ competitorNames, industry, slideType, region = "Nigeria" }) => {
+  execute: async ({
+    competitorNames,
+    industry,
+    slideType,
+    region = "Nigeria",
+  }) => {
     try {
       logger.info(
         {
@@ -82,9 +89,8 @@ const competitorAnalysisTool = tool({
             .map((r) => r.content)
             .join(" ");
           // Extract market share percentage using regex
-          const marketShareMatch = marketShareContent.match(
-            /(\d+\.?\d*)\s*%/gi
-          );
+          const marketShareMatch =
+            marketShareContent.match(/(\d+\.?\d*)\s*%/gi);
           if (marketShareMatch) {
             competitorData.marketShare = parseFloat(marketShareMatch[0]);
           }
@@ -252,16 +258,16 @@ const marketDataTool = tool({
       const nextYear = currentYear + 1;
       let query = "";
       switch (dataType) {
-        case "GROWTH_RATE":
+        case ResearchDataType.GROWTH_RATE:
           query = `${industry} growth rate CAGR ${region} ${currentYear} ${nextYear}`;
           break;
-        case "MARKET_SIZE":
+        case ResearchDataType.MARKET_SIZE:
           query = `${industry} market size USD ${region} ${currentYear}`;
           break;
-        case "POPULATION":
+        case ResearchDataType.POPULATION:
           query = `${industry} target population demographics ${region} ${currentYear}`;
           break;
-        case "BEHAVIOR":
+        case ResearchDataType.BEHAVIOR:
           query = `${industry} consumer behavior trends ${region} ${currentYear}`;
           break;
         default:
@@ -287,13 +293,11 @@ const marketDataTool = tool({
 
       // Extract structured data from search results
       if (searchResult?.results?.length > 0) {
-        const allContent = searchResult.results
-          .map((r) => r.content)
-          .join(" ");
+        const allContent = searchResult.results.map((r) => r.content).join(" ");
 
         // Extract numbers based on data type
         switch (dataType) {
-          case "GROWTH_RATE":
+          case ResearchDataType.GROWTH_RATE:
             // Look for percentage growth rates
             const growthMatch = allContent.match(
               /(\d+\.?\d*)\s*%\s*(?:CAGR|growth|annual|yearly)/gi
@@ -304,7 +308,7 @@ const marketDataTool = tool({
             }
             break;
 
-          case "MARKET_SIZE":
+          case ResearchDataType.MARKET_SIZE:
             // Look for market size in USD, NGN, or billions/millions
             const sizeMatch = allContent.match(
               /(\$|USD|NGN|₦)?\s*(\d+\.?\d*)\s*(billion|million|trillion)/gi
@@ -323,7 +327,7 @@ const marketDataTool = tool({
             }
             break;
 
-          case "POPULATION":
+          case ResearchDataType.POPULATION:
             // Look for population numbers
             const popMatch = allContent.match(
               /(\d+\.?\d*)\s*(million|billion|thousand)\s*(?:people|population|users|consumers)/gi
@@ -339,7 +343,7 @@ const marketDataTool = tool({
             }
             break;
 
-          case "BEHAVIOR":
+          case ResearchDataType.BEHAVIOR:
             // Extract key behavior trends (text-based)
             const behaviorKeywords = [
               "prefer",
@@ -422,4 +426,3 @@ module.exports = {
   competitorAnalysisTool,
   marketDataTool,
 };
-

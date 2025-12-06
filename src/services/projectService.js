@@ -1,6 +1,7 @@
 const { getPrismaClient } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError } = require("@/utils/errors");
+const { ProjectPhase } = require("@/constants");
 
 const logger = createLogger("service:project");
 const prisma = getPrismaClient();
@@ -13,7 +14,7 @@ class ProjectService {
         data: {
           clientId: data.clientId,
           name: data.name,
-          phase: "QUESTIONNAIRE",
+          phase: ProjectPhase.QUESTIONNAIRE,
           context: data.context,
         },
         include: {

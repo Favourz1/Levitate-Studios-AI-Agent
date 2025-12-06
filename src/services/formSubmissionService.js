@@ -1,7 +1,7 @@
 const { withTransaction } = require("@/database");
 const { createLogger } = require("@/utils/logger");
 const { ValidationError } = require("@/utils/errors");
-const { ProcessingStatus } = require("@/constants");
+const { ProcessingStatus, ProjectPhase, Actor } = require("@/constants");
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
@@ -144,7 +144,7 @@ class FormSubmissionService {
 
     return {
       name: projectName,
-      phase: "QUESTIONNAIRE",
+      phase: ProjectPhase.QUESTIONNAIRE,
     };
   }
 
@@ -303,9 +303,9 @@ class FormSubmissionService {
         data: {
           projectId: project.id,
           fromPhase: null,
-          toPhase: "QUESTIONNAIRE",
+          toPhase: ProjectPhase.QUESTIONNAIRE,
           reason: "Form submission received",
-          actor: "SYSTEM",
+          actor: Actor.SYSTEM,
           at: new Date(),
         },
       });

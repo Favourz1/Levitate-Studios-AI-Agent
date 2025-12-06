@@ -1,6 +1,7 @@
 const { Queue, Worker } = require("bullmq");
 const IORedis = require("ioredis");
 const { appConfig } = require("@/config");
+const { DocumentType } = require("@/constants");
 const {
   createLogger,
   logJobStart,
@@ -88,7 +89,7 @@ class QueueService {
     const jobData = {
       ...data,
       dedupeKey,
-      documentType: "BRAND_ORIGIN",
+      documentType: DocumentType.BRAND_ORIGIN,
     };
 
     return queues.docGeneration.add(

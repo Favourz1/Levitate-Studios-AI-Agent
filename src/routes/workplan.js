@@ -10,6 +10,7 @@ const { ValidationError } = require("@/utils/errors");
 const {
   DocumentType,
   DocumentStatus,
+  SlideStatus,
   AuditActions,
   SystemActors,
 } = require("@/constants");
@@ -62,9 +63,9 @@ router.post(
     await prisma.workplanSlide.update({
       where: { id: slideId },
       data: {
-        researchStatus: "PENDING",
-        contentStatus: "PENDING",
-        designStatus: "PENDING",
+        researchStatus: SlideStatus.PENDING,
+        contentStatus: SlideStatus.PENDING,
+        designStatus: SlideStatus.PENDING,
         metadataInfo: {
           ...(slide.metadataInfo || {}),
           regenerationReason: reason,
@@ -164,9 +165,9 @@ router.post(
     await prisma.workplanSlide.updateMany({
       where: { documentId },
       data: {
-        researchStatus: "PENDING",
-        contentStatus: "PENDING",
-        designStatus: "PENDING",
+        researchStatus: SlideStatus.PENDING,
+        contentStatus: SlideStatus.PENDING,
+        designStatus: SlideStatus.PENDING,
       },
     });
 
