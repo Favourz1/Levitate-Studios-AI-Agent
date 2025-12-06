@@ -853,10 +853,23 @@ async function updateExistingDocumentRecords(
       );
 
       try {
-        // Fallback to plain text update
+        // Fallback to plain text update - include header in text format
+        const clientName =
+          documentRecord.project?.client?.name || "Client Name";
+        const projectName =
+          documentRecord.project?.name || "Brand Development Project";
+
+        const headerText =
+          `[Levitate Studios Logo]\n\n` +
+          `Client: ${clientName}\t\tDoc: Brand Origins / Creative Brief\n` +
+          `Project: ${projectName}\t\tTask: Generate detailed brand document\n\n`;
+
+        // Prepend header to document content for fallback
+        const documentWithHeader = headerText + brandOriginDocument.document;
+
         await googleIntegration.updateDocument(
           documentRecord.document.driveFileId,
-          brandOriginDocument.document
+          documentWithHeader
         );
 
         documentUpdateSuccessful = true;
@@ -1112,9 +1125,22 @@ async function createDocumentRecords(
         "Formatted document creation failed, falling back to regular document creation"
       );
 
+      // Create text version of header to include in fallback
+      const clientName = documentRecord.project?.client?.name || "Client Name";
+      const projectName =
+        documentRecord.project?.name || "Brand Development Project";
+
+      const headerText =
+        `[Levitate Studios Logo]\n\n` +
+        `Client: ${clientName}\t\tDoc: Brand Origins / Creative Brief\n` +
+        `Project: ${projectName}\t\tTask: Generate detailed brand document\n\n`;
+
+      // Prepend header to document content for fallback
+      const documentWithHeader = headerText + brandOriginDocument.document;
+
       googleDoc = await googleIntegration.createDocument(
         documentRecord.documentTitle,
-        brandOriginDocument.document,
+        documentWithHeader,
         {
           folderId,
           makePublicReadable: false,
