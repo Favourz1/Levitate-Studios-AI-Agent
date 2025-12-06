@@ -448,8 +448,7 @@ function convertBrandOriginToFormattedBlocks(documentText, project) {
     // Add logo at the top
     blocks.push({
       type: "image",
-      fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
-      url: BrandAssets.LEVITATE_LOGO_URL, // Fallback URL
+      url: BrandAssets.LEVITATE_LOGO_URL,
       width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
       height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
     });
@@ -718,8 +717,7 @@ function convertBrandOriginToFormattedBlocks(documentText, project) {
     return [
       {
         type: "image",
-        fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
-        url: BrandAssets.LEVITATE_LOGO_URL, // Fallback URL
+        url: BrandAssets.LEVITATE_LOGO_URL,
         width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
         height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
       },

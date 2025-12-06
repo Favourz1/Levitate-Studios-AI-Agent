@@ -295,7 +295,8 @@ class WorkplanDocumentBuilderService {
     const slideBlocks = [];
     workplanDoc.workplanSlides.forEach((slide, index) => {
       if (index > 0) {
-        slideBlocks.push({ type: "horizontalRule" });
+        // Use adequate spacer instead of horizontalRule
+        slideBlocks.push({ type: "spacer", height: 18 });
         slideBlocks.push({ type: "spacer", height: 12 });
       }
       slideBlocks.push(...this.convertSlideToBlocks(slide));
