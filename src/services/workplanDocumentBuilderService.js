@@ -10,7 +10,8 @@ const {
   SystemActors,
   AuditActions,
 } = require("@/constants");
-const { retry } = require("@/utils");
+const { retry, isFinancialDocument } = require("@/utils");
+const { appConfig } = require("@/config");
 
 const logger = createLogger("service:workplan-document-builder");
 const prisma = getPrismaClient();
@@ -308,8 +309,24 @@ class WorkplanDocumentBuilderService {
       workplanDoc.project?.name || workplanDoc.id
     }`;
 
+    // Prepare sharing emails - include general team gmail for non-financial documents
+    const shareEmails = [];
+    if (
+      appConfig.generalTeamGmail &&
+      !isFinancialDocument(DocumentType.WORKPLAN)
+    ) {
+      shareEmails.push({
+        email: appConfig.generalTeamGmail,
+        role: "reader",
+        options: { sendNotification: false },
+      });
+    }
+
     const docResult = await retry(
-      () => googleIntegration.createFormattedDocument(docTitle, allBlocks),
+      () =>
+        googleIntegration.createFormattedDocument(docTitle, allBlocks, {
+          shareWithEmails: shareEmails,
+        }),
       3,
       1500
     );

@@ -61,6 +61,7 @@ const envSchema = Joi.object({
   FRONTEND_URL: Joi.string().uri().required(),
   EMAIL_DOMAIN: Joi.string().required(),
   EMAIL_REPLY_DOMAIN: Joi.string().required(),
+  GENERAL_TEAM_GMAIL: Joi.string().email().required(),
   LOG_LEVEL: Joi.string()
     .valid("error", "warn", "info", "debug", "trace")
     .default("info"),
@@ -99,6 +100,7 @@ const appConfig = {
       ? envVars.BASE_URL.slice(0, -1)
       : envVars.BASE_URL,
   },
+  generalTeamGmail: envVars.GENERAL_TEAM_GMAIL,
   google: {
     clientId: envVars.GOOGLE_CLIENT_ID,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET,

@@ -336,7 +336,9 @@ async function createQuoteDocumentRecords(params, correlationId) {
 }
 
 /**
- * Share main quote Drive file with Finance Manager
+ * Share quote Drive files with Finance Manager and Admin, then make publicly readable
+ * For financial documents, we do NOT share with general team gmail but make them publicly readable
+ * so team members with non-Gmail emails can view from email without exposing financial info to general team
  */
 async function shareQuoteDocumentsWithFinance(
   driveFiles,
@@ -349,23 +351,65 @@ async function shareQuoteDocumentsWithFinance(
   }
 
   try {
+    // Prepare recipients: Finance Manager and Admin
+    const recipients = [
+      {
+        email: financeUser.email,
+        role: "writer",
+        options: { sendNotification: true },
+      },
+    ];
+
+    // Add admin if configured
+    if (appConfig.server.adminEmail) {
+      recipients.push({
+        email: appConfig.server.adminEmail,
+        role: "writer",
+        options: { sendNotification: false },
+      });
+    }
+
+    // Share all quote documents with Finance Manager and Admin
     for (const driveFile of driveFiles) {
-      await googleIntegration.shareDocument(driveFile.driveFileId, [
-        {
-          email: financeUser.email,
-          role: "writer",
-          options: { sendNotification: true },
-        },
-      ]);
+      if (!driveFile?.driveFileId) continue;
+
+      await googleIntegration.shareDocument(driveFile.driveFileId, recipients);
+
+      // After sharing with necessary people, make the document publicly readable
+      // This allows team members with non-Gmail emails to view from email without exposing
+      // financial information to the general team gmail
+      try {
+        await googleIntegration.makeDocumentPublicReadable(
+          driveFile.driveFileId
+        );
+        logger.info(
+          {
+            driveFileId: driveFile.driveFileId,
+            correlationId,
+          },
+          "Made quote document publicly readable after sharing with Finance/Admin"
+        );
+      } catch (publicError) {
+        logger.warn(
+          {
+            driveFileId: driveFile.driveFileId,
+            error: publicError.message,
+            correlationId,
+          },
+          "Failed to make quote document publicly readable, but sharing succeeded"
+        );
+      }
     }
 
     logger.info(
       {
         financeEmail: financeUser.email,
+        adminEmail: appConfig.server.adminEmail,
+        driveFileCount: driveFiles.length,
         driveFileId: mainDriveFile?.driveFileId,
         correlationId,
       },
-      "Shared quote document with Finance Manager"
+      "Shared quote documents with Finance Manager and Admin, made publicly readable"
     );
   } catch (error) {
     logger.warn(
@@ -375,7 +419,7 @@ async function shareQuoteDocumentsWithFinance(
         error: error.message,
         correlationId,
       },
-      "Failed to share quote document with Finance Manager"
+      "Failed to share quote documents with Finance Manager/Admin"
     );
   }
 }
@@ -950,39 +994,77 @@ const updateQuoteProcessor = async (job) => {
       "Uploaded updated quote PDF to Google Drive"
     );
 
-    // Step 9.5: Share updated PDF with Finance Manager (before creating revision)
+    // Step 9.5: Share updated PDF with Finance Manager and Admin, then make publicly readable
+    // For financial documents, we do NOT share with general team gmail but make them publicly readable
     let financeUser =
       (await AsanaPendingProjectsService.getFinanceManager(projectId)) || null;
 
-    if (financeUser?.email) {
+    if (financeUser?.email || appConfig.server.adminEmail) {
       try {
-        await googleIntegration.shareDocument(driveFile.id, [
-          {
+        // Prepare recipients: Finance Manager and Admin
+        const recipients = [];
+        if (financeUser?.email) {
+          recipients.push({
             email: financeUser.email,
             role: "writer",
             options: { sendNotification: true },
-          },
-        ]);
+          });
+        }
+        if (appConfig.server.adminEmail) {
+          recipients.push({
+            email: appConfig.server.adminEmail,
+            role: "writer",
+            options: { sendNotification: false },
+          });
+        }
+
+        if (recipients.length > 0) {
+          await googleIntegration.shareDocument(driveFile.id, recipients);
+
+          // After sharing with necessary people, make the document publicly readable
+          // This allows team members with non-Gmail emails to view from email without exposing
+          // financial information to the general team gmail
+          try {
+            await googleIntegration.makeDocumentPublicReadable(driveFile.id);
+            logger.info(
+              {
+                driveFileId: driveFile.id,
+                correlationId,
+              },
+              "Made updated quote document publicly readable after sharing with Finance/Admin"
+            );
+          } catch (publicError) {
+            logger.warn(
+              {
+                driveFileId: driveFile.id,
+                error: publicError.message,
+                correlationId,
+              },
+              "Failed to make updated quote document publicly readable, but sharing succeeded"
+            );
+          }
+        }
 
         logger.info(
           {
-            financeEmail: financeUser.email,
+            financeEmail: financeUser?.email,
+            adminEmail: appConfig.server.adminEmail,
             driveFileId: driveFile.id,
             quoteId: finalQuoteId,
             correlationId,
           },
-          "Shared updated quote PDF with Finance Manager"
+          "Shared updated quote PDF with Finance Manager and Admin, made publicly readable"
         );
       } catch (shareError) {
         logger.warn(
           {
-            financeEmail: financeUser.email,
+            financeEmail: financeUser?.email,
             driveFileId: driveFile.id,
             quoteId: finalQuoteId,
             error: shareError.message,
             correlationId,
           },
-          "Failed to share updated quote PDF with Finance Manager"
+          "Failed to share updated quote PDF with Finance Manager/Admin"
         );
         // Don't throw - continue with workflow even if sharing fails
       }

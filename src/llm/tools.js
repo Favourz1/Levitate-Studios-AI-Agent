@@ -7,7 +7,8 @@ const { asanaIntegration } = require("@/integrations/asana");
 const { QueueService } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { NotFoundError, ValidationError } = require("@/utils/errors");
-const { generateDedupeKey } = require("@/utils");
+const { generateDedupeKey, isFinancialDocument } = require("@/utils");
+const { appConfig } = require("@/config");
 const {
   DocumentStatus,
   ProjectPhase,
@@ -186,8 +187,20 @@ const writeDocumentTool = tool({
   }),
   execute: async ({ projectId, documentType, content, title, summary }) => {
     try {
+      // Prepare sharing emails - include general team gmail for non-financial documents
+      const shareEmails = [];
+      if (appConfig.generalTeamGmail && !isFinancialDocument(documentType)) {
+        shareEmails.push({
+          email: appConfig.generalTeamGmail,
+          role: "reader",
+          options: { sendNotification: false },
+        });
+      }
+
       // Create Google Doc
-      const googleDoc = await googleIntegration.createDocument(title, content);
+      const googleDoc = await googleIntegration.createDocument(title, content, {
+        shareWithEmails: shareEmails,
+      });
 
       // Create document record
       const document = await prisma.document.create({
@@ -270,9 +283,25 @@ const createDocumentVariantTool = tool({
 
       const variants = await Promise.all(
         variantContent.map(async (variant, index) => {
+          // Prepare sharing emails - do not share financial variants with general team
+          const shareEmails = [];
+          if (
+            appConfig.generalTeamGmail &&
+            !isFinancialDocument(DocumentType.QUOTE_VARIANT)
+          ) {
+            shareEmails.push({
+              email: appConfig.generalTeamGmail,
+              role: "reader",
+              options: { sendNotification: false },
+            });
+          }
+
           const googleDoc = await googleIntegration.createDocument(
             variant.title,
-            variant.content
+            variant.content,
+            {
+              shareWithEmails: shareEmails,
+            }
           );
 
           const document = await prisma.document.create({

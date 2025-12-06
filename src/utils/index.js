@@ -6,6 +6,7 @@ const validation = require("@/utils/validation");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
 const { appConfig } = require("@/config");
+const { DocumentType } = require("@/constants");
 
 // Utility functions
 const generateUuid = () => uuidv4();
@@ -211,6 +212,18 @@ const throttle = (func, limit) => {
   };
 };
 
+/**
+ * Check if a document type is financial (QUOTE or QUOTE_VARIANT)
+ * @param {string} documentType - Document type to check
+ * @returns {boolean} True if document is financial
+ */
+const isFinancialDocument = (documentType) => {
+  return (
+    documentType === DocumentType.QUOTE ||
+    documentType === DocumentType.QUOTE_VARIANT
+  );
+};
+
 module.exports = {
   ...logger,
   ...errors,
@@ -238,4 +251,5 @@ module.exports = {
   chunk,
   debounce,
   throttle,
+  isFinancialDocument,
 };

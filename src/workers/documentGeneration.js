@@ -23,6 +23,7 @@ const {
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
 const { appConfig } = require("@/config");
+const { isFinancialDocument } = require("@/utils");
 const {
   DocumentType,
   DocumentStatus,
@@ -1103,6 +1104,19 @@ async function createDocumentRecords(
       documentRecord.project
     );
 
+    // Prepare sharing emails - include general team gmail for non-financial documents
+    const shareEmails = [];
+    if (
+      appConfig.generalTeamGmail &&
+      !isFinancialDocument(DocumentType.BRAND_ORIGIN)
+    ) {
+      shareEmails.push({
+        email: appConfig.generalTeamGmail,
+        role: "reader",
+        options: { sendNotification: false },
+      });
+    }
+
     // Create formatted document with logo, styling, and proper structure
     try {
       googleDoc = await googleIntegration.createFormattedDocument(
@@ -1111,7 +1125,7 @@ async function createDocumentRecords(
         {
           folderId,
           makePublicReadable: false,
-          shareWithEmails: [], // PM will be shared separately below
+          shareWithEmails: shareEmails, // Includes general team gmail, PM will be shared separately below
         }
       );
     } catch (formattedDocError) {
@@ -1138,12 +1152,26 @@ async function createDocumentRecords(
       // Prepend header to document content for fallback
       const documentWithHeader = headerText + brandOriginDocument.document;
 
+      // Prepare sharing emails for fallback - include general team gmail for non-financial documents
+      const fallbackShareEmails = [];
+      if (
+        appConfig.generalTeamGmail &&
+        !isFinancialDocument(DocumentType.BRAND_ORIGIN)
+      ) {
+        fallbackShareEmails.push({
+          email: appConfig.generalTeamGmail,
+          role: "reader",
+          options: { sendNotification: false },
+        });
+      }
+
       googleDoc = await googleIntegration.createDocument(
         documentRecord.documentTitle,
         documentWithHeader,
         {
           folderId,
           makePublicReadable: false,
+          shareWithEmails: fallbackShareEmails,
         }
       );
     }
