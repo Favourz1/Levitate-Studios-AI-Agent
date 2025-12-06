@@ -8,6 +8,7 @@ const {
   SystemActors,
   AuditActions,
   SlideType,
+  ResearchStatus,
   TeamRole,
   AsanaProjectBoardSections,
 } = require("@/constants");
@@ -36,6 +37,10 @@ const prisma = getPrismaClient();
  * Handles both initial generation and regeneration scenarios
  */
 const workplanGenerationProcessor = async (job) => {
+  if (job.name === "regenerate-slide") {
+    return slideRegenerationProcessor(job);
+  }
+
   const startTime = Date.now();
   const {
     projectId,
@@ -435,6 +440,273 @@ const workplanGenerationProcessor = async (job) => {
     throw error;
   }
 };
+
+/**
+ * Slide regeneration processor (handles single slide re-run)
+ */
+async function slideRegenerationProcessor(job) {
+  const startTime = Date.now();
+  const {
+    documentId,
+    slideId,
+    regenerationReason = null,
+    retryCount = 0,
+    correlationId: providedCorrelationId,
+  } = job.data || {};
+
+  const correlationId = providedCorrelationId || generateUuid();
+
+  logger.info(
+    {
+      jobId: job.id,
+      documentId,
+      slideId,
+      regenerationReason,
+      retryCount,
+      correlationId,
+    },
+    "Starting slide regeneration"
+  );
+
+  let projectId;
+  let serviceType;
+
+  try {
+    if (!documentId || !slideId) {
+      throw new Error(
+        "documentId and slideId are required for slide regeneration"
+      );
+    }
+
+    const slide = await prisma.workplanSlide.findUnique({
+      where: { id: slideId },
+      include: { document: true },
+    });
+
+    if (!slide || !slide.document || slide.documentId !== documentId) {
+      throw new Error("Slide not found for the provided documentId");
+    }
+
+    if (slide.document.type !== DocumentType.WORKPLAN) {
+      throw new Error("Document is not a workplan");
+    }
+
+    const document = slide.document;
+    projectId = document.projectId;
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        client: true,
+        questionnaireResponses: { orderBy: { submittedAt: "desc" }, take: 1 },
+        documents: {
+          where: {
+            type: { in: [DocumentType.BRAND_ORIGIN, DocumentType.QUOTE] },
+            status: { in: [DocumentStatus.ACCEPTED, DocumentStatus.COMPLETED] },
+          },
+          include: {
+            revisions: { orderBy: { createdAt: "desc" }, take: 1 },
+          },
+        },
+      },
+    });
+
+    if (!project) {
+      throw new Error(`Project not found for workplan document ${documentId}`);
+    }
+
+    serviceType =
+      document.metadataInfo?.serviceType ||
+      (await WorkplanPlannerService.getServiceType(project.id));
+
+    const brandOrigin = project.documents?.find(
+      (d) => d.type === DocumentType.BRAND_ORIGIN
+    );
+
+    const context = {
+      project,
+      questionnaire: project.questionnaireResponses?.[0],
+      brandOrigin: brandOrigin?.revisions?.[0],
+      serviceType,
+      regenerationFeedback: regenerationReason || null,
+      documentId,
+    };
+
+    // Mark document as generating while regeneration runs
+    await prisma.document.update({
+      where: { id: documentId },
+      data: {
+        status: DocumentStatus.GENERATING,
+        metadataInfo: {
+          ...(document.metadataInfo || {}),
+          serviceType,
+          regenerationReason,
+          lastSlideRegenerationId: slideId,
+          regeneratedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    // Re-run research (Agent B)
+    let researchResult = null;
+    try {
+      researchResult = await WorkplanResearcherService.researchWithFallback(
+        slide,
+        context
+      );
+    } catch (error) {
+      await prisma.workplanSlide.update({
+        where: { id: slideId },
+        data: { researchStatus: ResearchStatus.FAILED },
+      });
+      throw error;
+    }
+
+    let refreshedSlide = await prisma.workplanSlide.findUnique({
+      where: { id: slideId },
+    });
+
+    // Re-run strategist (Agent C)
+    try {
+      await WorkplanStrategistService.synthesizeSlideContent(
+        refreshedSlide,
+        researchResult || refreshedSlide?.researchData,
+        { ...context, documentId }
+      );
+
+      refreshedSlide = await prisma.workplanSlide.findUnique({
+        where: { id: slideId },
+      });
+
+      if (refreshedSlide?.slideType === SlideType.BIG_IDEA) {
+        await WorkplanStrategistService.generateBigIdeaOptions(
+          documentId,
+          slideId,
+          { ...context, documentId }
+        );
+      }
+    } catch (error) {
+      await prisma.workplanSlide.update({
+        where: { id: slideId },
+        data: { contentStatus: ResearchStatus.FAILED },
+      });
+      throw error;
+    }
+
+    refreshedSlide = await prisma.workplanSlide.findUnique({
+      where: { id: slideId },
+    });
+
+    // Re-run art director (Agent D)
+    try {
+      await WorkplanArtDirectorService.generateDesignDirectives(
+        refreshedSlide,
+        refreshedSlide?.contentCopy,
+        { ...context, documentId }
+      );
+    } catch (error) {
+      await prisma.workplanSlide.update({
+        where: { id: slideId },
+        data: { designStatus: ResearchStatus.FAILED },
+      });
+      throw error;
+    }
+
+    // Rebuild Google Doc (Agent E)
+    const buildResult = await WorkplanDocumentBuilderService.buildGoogleDoc(
+      documentId
+    );
+    const duration = Date.now() - startTime;
+
+    await prisma.auditLog.create({
+      data: {
+        projectId,
+        actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+        action: AuditActions.WORKPLAN_GENERATION_COMPLETED,
+        details: {
+          documentId,
+          slideId,
+          regeneration: true,
+          regenerationReason,
+          googleDocUrl: buildResult?.googleDocUrl || null,
+          duration,
+          correlationId,
+        },
+      },
+    });
+
+    logger.info(
+      {
+        jobId: job.id,
+        documentId,
+        slideId,
+        duration,
+        correlationId,
+      },
+      "Slide regeneration completed successfully"
+    );
+    // TODO: When slide regeneration successsful, send email to person that took the action
+    return {
+      success: true,
+      documentId,
+      slideId,
+      regenerationReason,
+      googleDocUrl: buildResult?.googleDocUrl || null,
+      duration,
+    };
+  } catch (error) {
+    const duration = Date.now() - startTime;
+
+    logger.error(
+      {
+        jobId: job.id,
+        documentId,
+        slideId,
+        projectId,
+        serviceType,
+        error: error.message,
+        stack: error.stack,
+        duration,
+        correlationId,
+      },
+      "Slide regeneration failed"
+    );
+
+    if (documentId) {
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { status: DocumentStatus.FAILED },
+      });
+    }
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          projectId,
+          actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+          action: AuditActions.WORKPLAN_GENERATION_FAILED,
+          details: {
+            documentId,
+            slideId,
+            regeneration: true,
+            regenerationReason,
+            serviceType,
+            retryCount,
+            error: error.message,
+            correlationId,
+          },
+        },
+      });
+    } catch (auditError) {
+      logger.error(
+        { projectId, auditError: auditError.message, correlationId },
+        "Failed to create audit log for slide regeneration failure"
+      );
+    }
+
+    throw error;
+  }
+}
 
 /**
  * Create a workplan review task in Asana for the Creative Director
@@ -903,4 +1175,5 @@ function addBusinessDays(startDate, businessDays) {
 
 module.exports = {
   workplanGenerationProcessor,
+  slideRegenerationProcessor,
 };
