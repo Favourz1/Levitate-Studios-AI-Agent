@@ -1276,6 +1276,25 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
   - Store in `slide.qualityScore` field
   - Use for flagging slides that need improvement
 
+### 12.3 Update Email Templates (`src/services/emailTemplateService.js`)
+
+- [ ] **Task 12.3.1**: Add workplan completion email template
+
+  - Create template for Creative Director
+  - Include: project name, client name, workplan URL, slide count
+  - Add "View Workplan" button linking to Google Doc
+  - Reference existing email template patterns
+  - Send this email to the cretive director after the completion email has been sent.
+
+### 12.4: Refactor to Centralized Constants
+
+- [ ] **Task 12.4.1**: Refactor to Centralized Constants
+- Move all constant values (enums, status keys, service types, asset URLs, etc.) to `src/constants/index.js`
+- Replace hardcoded strings in service, model, and integration code with imports from `@/constants`
+- Ensure no logic or switch statements depend on raw string literals for business/domain values
+- Update tests and helper files to use centralized constants
+- Do **not** break existing functionality; verify all usages are properly refactored and regression tested
+
 ### 🔍 **CHECKPOINT 12**: Test Edge Cases
 
 **Human Action Required**:
@@ -1301,18 +1320,7 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
   - Include: project name, client name, workplan URL, slide count
   - Add "View Workplan" button linking to Google Doc
   - Reference existing email template patterns
-
-- [ ] **Task 13.1.2**: Update project initialization completion email
-  - Move from `asanaProjectInit.js` to workplan generation worker
-  - Include workplan link if available
-  - Send to Admin, Manager (if any), and PM
-
-### 13.2 Update LLM Tools (`src/llm/tools.js`)
-
-- [ ] **Task 13.2.1**: Add workplan-related tools if needed
-  - Review if any additional tools needed for workplan generation
-  - Add tools for reading workplan context, slide data, etc.
-  - Export tools
+  - Send this after the completion email has been sent
 
 ### 13.3 Final Testing
 
@@ -1364,14 +1372,14 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
   - Document parameters, return values, errors
   - Add usage examples where helpful
 
-- [ ] **Task 14.1.2**: Document complex algorithms
+- [ ] **Task 14.1.2**: Document complex algorithms in `guides` directory at project root - all in one file.
   - Document research strategy selection
   - Document layout determination logic
   - Document service type mapping
 
 ### 14.2 Update Implementation Plan
 
-- [ ] **Task 14.2.1**: Update implementation plan with any deviations
+- [ ] **Task 14.2.1**: Update implementation plan for step 8 with any deviations - READ CODES TO FIND OUT, IF NO DEVIATIONS DO NOT TOUCH THE STEP 8 IMPLEMENTATION PLAN
   - Document any changes from original plan
   - Note any issues encountered and solutions
 
@@ -1380,7 +1388,6 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
 - [ ] **Task 14.3.1**: Remove any temporary test code
 
   - Clean up console.logs
-  - Remove test files if created
   - Remove commented-out code
 
 - [ ] **Task 14.3.2**: Verify all imports are used
