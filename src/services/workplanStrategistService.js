@@ -99,6 +99,19 @@ class WorkplanStrategistService {
 
       const synthesizedContent = result.data;
 
+      // Run lightweight quality checks (numbers, sources, actionability)
+      const qualityCheck = this.evaluateContentQuality(
+        synthesizedContent,
+        researchDataToUse
+      );
+
+      const computedQualityScore =
+        synthesizedContent.qualityScore ?? qualityCheck.score;
+      const finalQualityScore =
+        typeof computedQualityScore === "number"
+          ? Math.max(0, Math.min(10, computedQualityScore))
+          : null;
+
       // Store synthesized content in database
       await prisma.workplanSlide.update({
         where: { id: slideData.id },
@@ -106,13 +119,21 @@ class WorkplanStrategistService {
           contentCopy: synthesizedContent.contentCopy,
           dataPoints: synthesizedContent.dataPoints || null,
           contentStatus: "COMPLETED",
-          qualityScore: synthesizedContent.qualityScore
-            ? parseFloat(synthesizedContent.qualityScore.toFixed(2))
-            : null,
+          qualityScore:
+            finalQualityScore !== null
+              ? parseFloat(finalQualityScore.toFixed(2))
+              : null,
           metadataInfo: {
             ...(slideData.metadataInfo || {}),
             keyPoints: synthesizedContent.keyPoints || [],
             sourceCitations: synthesizedContent.sourceCitations || [],
+            contentQuality: {
+              hasSpecificNumbers: qualityCheck.hasNumbers,
+              hasSources: qualityCheck.hasSources,
+              hasActionableInsights: qualityCheck.hasActionableInsights,
+              strategicDepthScore: qualityCheck.strategicDepthScore,
+              issues: qualityCheck.issues,
+            },
           },
           updatedAt: new Date(),
         },
@@ -127,7 +148,7 @@ class WorkplanStrategistService {
           details: {
             slideId: slideData.id,
             slideType: slideData.slideType,
-            qualityScore: synthesizedContent.qualityScore,
+            qualityScore: finalQualityScore,
             traceId: result.traceId,
           },
         },
@@ -180,6 +201,53 @@ class WorkplanStrategistService {
 
       throw error;
     }
+  }
+
+  /**
+   * Lightweight quality validation to ensure outputs aren't fluffy
+   * @param {Object} content - LLM structured response
+   * @param {Object} researchData - Research data for reference
+   * @returns {Object} quality signals and computed score
+   */
+  static evaluateContentQuality(content, researchData) {
+    const text = content?.contentCopy || "";
+    const citations = content?.sourceCitations || [];
+    const hasNumbers = /\d/.test(text);
+    const hasSources = Array.isArray(citations) && citations.length > 0;
+    const hasActionableInsights =
+      /should|must|recommend|plan|strategy|next steps|action/i.test(text);
+    const strategicDepthScore = Math.min(
+      10,
+      2.5 * Number(hasActionableInsights) +
+        2 * Number(hasSources) +
+        2 * Number(hasNumbers)
+    );
+
+    const issues = [];
+    if (!hasNumbers) issues.push("No specific numbers found");
+    if (!hasSources) issues.push("Missing source citations");
+    if (!hasActionableInsights) issues.push("Lacks actionable guidance");
+
+    const baseScore = content?.qualityScore;
+    const heuristicScore =
+      6 +
+      (hasNumbers ? 1.5 : -1) +
+      (hasSources ? 1.5 : -1) +
+      (hasActionableInsights ? 1 : -0.5);
+    const score =
+      typeof baseScore === "number"
+        ? baseScore
+        : Math.max(0, Math.min(10, heuristicScore));
+
+    return {
+      hasNumbers,
+      hasSources,
+      hasActionableInsights,
+      strategicDepthScore: Number(strategicDepthScore.toFixed(2)),
+      issues,
+      score,
+      researchData,
+    };
   }
 
   /**

@@ -10,6 +10,7 @@ const {
   SystemActors,
   AuditActions,
 } = require("@/constants");
+const { retry } = require("@/utils");
 
 const logger = createLogger("service:workplan-document-builder");
 const prisma = getPrismaClient();
@@ -307,9 +308,10 @@ class WorkplanDocumentBuilderService {
       workplanDoc.project?.name || workplanDoc.id
     }`;
 
-    const docResult = await googleIntegration.createFormattedDocument(
-      docTitle,
-      allBlocks
+    const docResult = await retry(
+      () => googleIntegration.createFormattedDocument(docTitle, allBlocks),
+      3,
+      1500
     );
 
     const completedAt = new Date().toISOString();

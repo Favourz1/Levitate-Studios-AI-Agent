@@ -246,6 +246,47 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate workplan completion email template for Creative Director
+   * @param {Object} project - Project data (with client)
+   * @param {string} googleDocUrl - Google Doc URL for the workplan
+   * @param {number} slideCount - Number of slides in the workplan
+   * @returns {{subject:string, htmlContent:string}}
+   */
+  static generateWorkplanCompletionTemplate(project, googleDocUrl, slideCount) {
+    const safeSlideCount = Number.isFinite(slideCount) ? slideCount : 0;
+    const subject = `Workplan Ready for Review: ${project.name}`;
+
+    const htmlContent = `
+      <h2>Workplan Generated Successfully</h2>
+      <p>The AI agent has completed the workplan document with research, strategic content, and design directives.</p>
+
+      <h3>Project Details</h3>
+      <ul>
+        <li><strong>Project:</strong> ${project.name}</li>
+        <li><strong>Client:</strong> ${project.client?.name || "N/A"}</li>
+        <li><strong>Slides:</strong> ${safeSlideCount || "N/A"}</li>
+      </ul>
+
+      <p>
+        <a href="${googleDocUrl}" target="_blank"
+          style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+          View Workplan →
+        </a>
+      </p>
+
+      <p>Please review and share feedback if adjustments are needed.</p>
+
+      <hr>
+      <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
+    `;
+
+    return {
+      subject,
+      htmlContent,
+    };
+  }
+
+  /**
    * Generate document review notification template
    * @param {Object} document - Document data
    * @param {Object} project - Project data

@@ -339,7 +339,9 @@ const workplanGenerationProcessor = async (job) => {
     await sendCompletionEmail(
       project.id,
       project.asanaProjectGid,
-      correlationId
+      correlationId,
+      googleDocUrl,
+      slides.length
     );
 
     const duration = Date.now() - startTime;
@@ -775,7 +777,13 @@ async function createWorkplanReviewTask(
  * @param {string} asanaProjectGid - Asana project GID
  * @param {string} correlationId - Correlation ID
  */
-async function sendCompletionEmail(projectId, asanaProjectGid, correlationId) {
+async function sendCompletionEmail(
+  projectId,
+  asanaProjectGid,
+  correlationId,
+  googleDocUrl,
+  slideCount
+) {
   try {
     logger.info(
       {
@@ -883,14 +891,14 @@ async function sendCompletionEmail(projectId, asanaProjectGid, correlationId) {
         recipients.push({
           email: adminUser.email,
           name: adminUser.name,
-          role: "Admin",
+          role: TeamRole.ADMIN,
         });
       } else {
         // Fallback: add admin email even if not in team members
         recipients.push({
           email: appConfig.server.adminEmail,
           name: "Admin",
-          role: "Admin",
+          role: TeamRole.ADMIN,
         });
       }
     }
@@ -913,7 +921,7 @@ async function sendCompletionEmail(projectId, asanaProjectGid, correlationId) {
       recipients.push({
         email: manager.email,
         name: manager.name,
-        role: "Manager",
+        role: TeamRole.MANAGER,
       });
     }
 
@@ -924,7 +932,7 @@ async function sendCompletionEmail(projectId, asanaProjectGid, correlationId) {
       recipients.push({
         email: pmUser.email,
         name: pmUser.name,
-        role: "Project Manager",
+        role: TeamRole.PROJECT_MANAGER,
       });
     }
 
@@ -1083,12 +1091,51 @@ async function sendCompletionEmail(projectId, asanaProjectGid, correlationId) {
       }
     }
 
+    // Send workplan completion email to Creative Director (with workplan link)
+    if (googleDocUrl) {
+      try {
+        const creativeDirector = await getCreativeDirector(projectId);
+        if (creativeDirector && creativeDirector.email) {
+          const workplanTemplate =
+            EmailTemplateService.generateWorkplanCompletionTemplate(
+              project,
+              googleDocUrl,
+              slideCount || projectDocuments.length || 0
+            );
+
+          await brevoIntegration.sendTransactionalEmail({
+            to: [creativeDirector.email],
+            subject: workplanTemplate.subject,
+            htmlContent: workplanTemplate.htmlContent,
+          });
+
+          logger.info(
+            {
+              recipient: creativeDirector.email,
+              projectId,
+              correlationId,
+            },
+            "Workplan completion email sent to Creative Director"
+          );
+        }
+      } catch (cdEmailError) {
+        logger.error(
+          {
+            projectId,
+            error: cdEmailError.message,
+            correlationId,
+          },
+          "Failed to send workplan completion email to Creative Director"
+        );
+      }
+    }
+
     // Create audit log for email notification
     await prisma.auditLog.create({
       data: {
         projectId,
         actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
-        action: "PROJECT_INIT_COMPLETION_EMAIL_SENT",
+        action: AuditActions.WORKPLAN_GENERATION_COMPLETED_EMAIL_SEND_ATTEMPTED,
         details: {
           recipientsNotified: recipients.map((r) => r.email),
           adminManagerRecipients: adminManagerRecipients.map((r) => ({
