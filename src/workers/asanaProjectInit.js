@@ -21,6 +21,8 @@ const {
 const {
   AsanaPendingProjectsService,
 } = require("@/services/asanaPendingProjectsService");
+const { WorkplanPlannerService } = require("@/services/workplanPlannerService");
+const { QueueService } = require("@/queues");
 
 const logger = createLogger("worker:asanaProjectInit");
 const prisma = getPrismaClient();
@@ -408,9 +410,39 @@ const asanaProjectInitProcessor = async (job) => {
       },
     });
 
-    // Step 10: Send completion email to Admin, Manager (if any), and PM
-    // TODO: Move this to be after workplan has been genrated
-    await sendCompletionEmail(project, asanaProjectGid, correlationId);
+    // Step 10: Enqueue workplan generation (service type is cached if already determined)
+    try {
+      const serviceType = await WorkplanPlannerService.getServiceType(
+        project.id
+      );
+
+      await QueueService.addWorkplanGenerationJob(
+        {
+          projectId: project.id,
+          serviceType,
+          correlationId,
+        },
+        5
+      );
+
+      logger.info(
+        {
+          projectId,
+          serviceType,
+          correlationId,
+        },
+        "Workplan generation job enqueued"
+      );
+    } catch (workplanError) {
+      logger.error(
+        {
+          projectId,
+          error: workplanError.message,
+          correlationId,
+        },
+        "Failed to enqueue workplan generation job"
+      );
+    }
 
     const duration = Date.now() - startTime;
 
@@ -478,269 +510,6 @@ const asanaProjectInitProcessor = async (job) => {
     throw error;
   }
 };
-
-/**
- * Send completion email to Admin, Manager (if any), and PM
- * @param {Object} project - Project data
- * @param {string} asanaProjectGid - Asana project GID
- * @param {string} correlationId - Correlation ID
- */
-async function sendCompletionEmail(project, asanaProjectGid, correlationId) {
-  try {
-    logger.info(
-      {
-        projectId: project.id,
-        asanaProjectGid,
-        correlationId,
-      },
-      "Sending project initialization completion email"
-    );
-
-    // Build Asana project URL
-    const asanaProjectUrl = `https://app.asana.com/1/${appConfig.asana.workspaceGid}/project/${asanaProjectGid}/`;
-
-    // Get recipients: Admin, Manager (if any), and PM
-    const recipients = [];
-
-    // Get Admin
-    if (appConfig.server.adminEmail) {
-      const adminUser = await prisma.teamMember.findFirst({
-        where: {
-          email: appConfig.server.adminEmail,
-          isActive: true,
-        },
-      });
-
-      if (adminUser) {
-        recipients.push({
-          email: adminUser.email,
-          name: adminUser.name,
-          role: "Admin",
-        });
-      } else {
-        // Fallback: add admin email even if not in team members
-        recipients.push({
-          email: appConfig.server.adminEmail,
-          name: "Admin",
-          role: "Admin",
-        });
-      }
-    }
-
-    // Get Manager (if any)
-    const managerUsers = await prisma.teamMember.findMany({
-      where: {
-        isActive: true,
-        roles: {
-          array_contains: [
-            {
-              role: TeamRole.MANAGER,
-            },
-          ],
-        },
-      },
-    });
-
-    for (const manager of managerUsers) {
-      recipients.push({
-        email: manager.email,
-        name: manager.name,
-        role: "Manager",
-      });
-    }
-
-    // Get PM assigned to this project
-    const pmUser = await AsanaPendingProjectsService.getPMUser(project.id);
-
-    if (pmUser && pmUser.email) {
-      recipients.push({
-        email: pmUser.email,
-        name: pmUser.name,
-        role: "Project Manager",
-      });
-    }
-
-    if (recipients.length === 0) {
-      logger.warn(
-        {
-          projectId: project.id,
-          correlationId,
-        },
-        "No recipients found for project initialization completion email"
-      );
-      return;
-    }
-
-    // Fetch Google Drive links for project documents
-    // Only include accepted brand origin and selected accepted quote
-    const projectDocuments = [];
-    if (project.documents && project.documents.length > 0) {
-      for (const doc of project.documents) {
-        // Double-check: only process accepted brand origin or accepted quote with selectedQuoteId
-        const isAcceptedBrandOrigin =
-          doc.type === DocumentType.BRAND_ORIGIN &&
-          doc.status === DocumentStatus.ACCEPTED;
-        const isSelectedAcceptedQuote =
-          doc.type === DocumentType.QUOTE &&
-          doc.status === DocumentStatus.ACCEPTED &&
-          doc.selectedQuoteId !== null;
-
-        if (
-          (isAcceptedBrandOrigin || isSelectedAcceptedQuote) &&
-          doc.driveFileId
-        ) {
-          try {
-            const fileMetadata = await googleIntegration.getDocumentMetadata(
-              doc.driveFileId
-            );
-            if (fileMetadata?.webViewLink) {
-              projectDocuments.push({
-                type: doc.type,
-                status: doc.status,
-                driveLink: fileMetadata.webViewLink,
-              });
-            }
-          } catch (driveError) {
-            logger.warn(
-              {
-                projectId: project.id,
-                documentId: doc.id,
-                driveFileId: doc.driveFileId,
-                error: driveError.message,
-                correlationId,
-              },
-              "Failed to get Drive link for document"
-            );
-            // Continue with other documents even if one fails
-          }
-        }
-      }
-    }
-
-    // Send separate emails based on recipient role
-    // PM gets email without financials, Admin/Manager get email with financials
-
-    const adminManagerRecipients = recipients.filter(
-      (r) => r.role === TeamRole.ADMIN || r.role === TeamRole.MANAGER
-    );
-    const pmRecipients = recipients.filter(
-      (r) => r.role === TeamRole.PROJECT_MANAGER
-    );
-
-    // Send emails to Admin/Manager (with financials)
-    if (adminManagerRecipients.length > 0) {
-      try {
-        const emailTemplate =
-          EmailTemplateService.generateProjectInitializationCompleteTemplate(
-            project,
-            asanaProjectUrl,
-            projectDocuments,
-            true // includeFinancials = true
-          );
-
-        await brevoIntegration.sendTransactionalEmail({
-          to: adminManagerRecipients.map((r) => r.email),
-          subject: emailTemplate.subject,
-          htmlContent: emailTemplate.htmlContent,
-        });
-
-        logger.info(
-          {
-            recipients: adminManagerRecipients.map((r) => r.email),
-            includeFinancials: true,
-            projectId: project.id,
-            correlationId,
-          },
-          "Project initialization completion email sent to Admin/Manager"
-        );
-      } catch (emailError) {
-        logger.error(
-          {
-            recipients: adminManagerRecipients.map((r) => r.email),
-            emailError: emailError.message,
-            projectId: project.id,
-            correlationId,
-          },
-          "Failed to send project initialization completion email to Admin/Manager"
-        );
-        // Don't throw - this shouldn't fail the main workflow
-      }
-    }
-
-    // Send email to PM (without financials)
-    if (pmRecipients.length > 0) {
-      try {
-        const emailTemplate =
-          EmailTemplateService.generateProjectInitializationCompleteTemplate(
-            project,
-            asanaProjectUrl,
-            projectDocuments,
-            false // includeFinancials = false
-          );
-
-        await brevoIntegration.sendTransactionalEmail({
-          to: pmRecipients.map((r) => r.email),
-          subject: emailTemplate.subject,
-          htmlContent: emailTemplate.htmlContent,
-        });
-
-        logger.info(
-          {
-            recipients: pmRecipients.map((r) => r.email),
-            includeFinancials: false,
-            projectId: project.id,
-            correlationId,
-          },
-          "Project initialization completion email sent to PM (without financials)"
-        );
-      } catch (emailError) {
-        logger.error(
-          {
-            recipients: pmRecipients.map((r) => r.email),
-            emailError: emailError.message,
-            projectId: project.id,
-            correlationId,
-          },
-          "Failed to send project initialization completion email to PM"
-        );
-        // Don't throw - this shouldn't fail the main workflow
-      }
-    }
-
-    // Create audit log for email notification
-    await prisma.auditLog.create({
-      data: {
-        projectId: project.id,
-        actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
-        action: "PROJECT_INIT_COMPLETION_EMAIL_SENT",
-        details: {
-          recipientsNotified: recipients.map((r) => r.email),
-          adminManagerRecipients: adminManagerRecipients.map((r) => ({
-            email: r.email,
-            includeFinancials: true,
-          })),
-          pmRecipients: pmRecipients.map((r) => ({
-            email: r.email,
-            includeFinancials: false,
-          })),
-          documentsCount: projectDocuments.length,
-          correlationId,
-        },
-        at: new Date(),
-      },
-    });
-  } catch (error) {
-    logger.error(
-      {
-        projectId: project.id,
-        error: error.message,
-        correlationId,
-      },
-      "Failed to send project initialization completion email"
-    );
-    // Don't throw - this shouldn't fail the main workflow
-  }
-}
 
 module.exports = {
   asanaProjectInitProcessor,

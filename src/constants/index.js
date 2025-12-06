@@ -135,7 +135,7 @@ const TeamRole = {
 const BrandAssets = {
   LEVITATE_LOGO_FILE_ID: "1_QMmI4uJVrmOISru8027mE0hOaGuYI6O", // Google Drive file ID for logo
   LEVITATE_LOGO_URL:
-    "https://levitate.ng/wp-content/uploads/2022/02/Group-1.svg", // Fallback URL Note: Svg doesnt work only png, jpg and jpeg
+    "https://res.cloudinary.com/dpksx8hse/image/upload/Levitate_Logo_xotdzc.png", // Fallback URL Note: Svg doesnt work only png, jpg and jpeg
   LOGO_DIMENSIONS: {
     WIDTH: 125, // pixels
     HEIGHT: 32, // pixels
@@ -248,6 +248,8 @@ const AuditActions = {
   WORKPLAN_SLIDE_RESEARCH_COMPLETED: "WORKPLAN_SLIDE_RESEARCH_COMPLETED",
   WORKPLAN_SLIDE_CONTENT_COMPLETED: "WORKPLAN_SLIDE_CONTENT_COMPLETED",
   WORKPLAN_SLIDE_DESIGN_COMPLETED: "WORKPLAN_SLIDE_DESIGN_COMPLETED",
+  WORKPLAN_GENERATION_COMPLETED_EMAIL_SEND_ATTEMPTED:
+    "WORKPLAN_GENERATION_COMPLETED_EMAIL_SEND_ATTEMPTED",
 };
 
 // System Email Addresses

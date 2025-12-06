@@ -145,6 +145,7 @@ class EmailTemplateService {
         : "";
 
       // Filter documents based on includeFinancials flag
+      // Workplan documents are visible to both admin/manager and PM (no restrictions)
       const documentsToShow = includeFinancials
         ? projectDocuments
         : projectDocuments.filter(
@@ -165,6 +166,8 @@ class EmailTemplateService {
                 ? "Quote Document"
                 : doc.type === DocumentType.QUOTE_VARIANT
                 ? "Quote Variant"
+                : doc.type === DocumentType.WORKPLAN
+                ? "Workplan Document"
                 : "Document";
 
             if (doc.driveLink) {
