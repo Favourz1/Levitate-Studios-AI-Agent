@@ -741,10 +741,7 @@ class GoogleIntegration {
         if (block.type === BlockType.TABLE) {
           // 1. Flush any pending text blocks first
           if (currentBatch.length > 0) {
-            await this.docs.documents.batchUpdate({
-              documentId,
-              requestBody: { requests: currentBatch },
-            });
+            await this._batchUpdateWithRetry(documentId, currentBatch);
             currentBatch = [];
           }
 
@@ -769,10 +766,7 @@ class GoogleIntegration {
 
       // Flush remaining requests
       if (currentBatch.length > 0) {
-        await this.docs.documents.batchUpdate({
-          documentId,
-          requestBody: { requests: currentBatch },
-        });
+        await this._batchUpdateWithRetry(documentId, currentBatch);
       }
 
       logger.info({ documentId }, "All blocks processed successfully");
@@ -900,25 +894,17 @@ class GoogleIntegration {
         },
       });
 
-      await this.docs.documents.batchUpdate({
-        documentId,
-        requestBody: { requests: finalRequests },
-      });
+      await this._batchUpdateWithRetry(documentId, finalRequests);
     } else {
       // Just the safety newline
-      await this.docs.documents.batchUpdate({
-        documentId,
-        requestBody: {
-          requests: [
-            {
-              insertText: {
-                endOfSegmentLocation: { segmentId: "" },
-                text: "\n",
-              },
-            },
-          ],
+      await this._batchUpdateWithRetry(documentId, [
+        {
+          insertText: {
+            endOfSegmentLocation: { segmentId: "" },
+            text: "\n",
+          },
         },
-      });
+      ]);
     }
   }
 
@@ -1262,6 +1248,31 @@ class GoogleIntegration {
     }
 
     return { requests, insertedLength };
+  }
+
+  /**
+   * Batch update helper with chunking and retry to reduce "Internal error encountered"
+   * @private
+   */
+  async _batchUpdateWithRetry(documentId, requests) {
+    const chunkSize = 20;
+    const chunks = [];
+    for (let i = 0; i < requests.length; i += chunkSize) {
+      chunks.push(requests.slice(i, i + chunkSize));
+    }
+
+    for (const chunk of chunks) {
+      await retry(
+        async () => {
+          await this.docs.documents.batchUpdate({
+            documentId,
+            requestBody: { requests: chunk },
+          });
+        },
+        2,
+        500
+      );
+    }
   }
 
   /**
