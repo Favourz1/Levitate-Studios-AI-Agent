@@ -8,6 +8,7 @@ const {
   DocumentStatus,
   LLMTaskType,
 } = require("@/constants");
+const { EmailDirection } = require("@/constants");
 const { googleIntegration } = require("@/integrations/google");
 
 const logger = createLogger("service:asana-project");

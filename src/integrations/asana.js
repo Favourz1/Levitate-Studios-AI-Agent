@@ -363,17 +363,16 @@ class AsanaIntegration {
             const results = [];
             for (const memberGid of memberGids) {
               try {
+                // Asana v3 SDK uses addMembersForProject; send single-member payload
                 const requestBody = {
                   data: {
-                    user: memberGid,
+                    members: [memberGid],
                   },
                 };
 
-                const opts = {};
-                await this.projectsApi.addUserForProject(
-                  requestBody,
+                await this.projectsApi.addMembersForProject(
                   projectGid,
-                  opts
+                  requestBody
                 );
 
                 results.push({
@@ -1143,6 +1142,8 @@ class AsanaIntegration {
               completed_since: options.completed_since || "now", // Default to incomplete tasks
               opt_fields: options.opt_fields || "gid,completed",
               limit: options.limit || 100,
+              // Asana requires a scoping parameter; use workspace to avoid 400 errors
+              workspace: appConfig.asana.workspaceGid,
             };
 
             if (options.offset) {
