@@ -212,7 +212,7 @@ class WorkplanResearcherService {
       const clientName = context.project?.client?.name || "";
 
       // Build comprehensive prompt for region extraction
-      const prompt = `You are an expert market researcher analyzing project context to determine the target geographic region/market.
+      const prompt = `You are an expert market researcher analyzing project context to determine the target geographic region/market and MUST return JSON that matches the provided schema exactly.
 
 **Project Context:**
 - Client Name: ${clientName || "Not specified"}
@@ -225,20 +225,23 @@ class WorkplanResearcherService {
 - Brand Origin Document: ${brandOrigin ? brandOrigin : "Not available"}
 
 **Task:**
-Extract the PRIMARY target region/market for this project. Look for:
-1. Geographic focus, target market, target region, target countries in questionnaire
-2. Market focus, geographic scope in client context
-3. Regional mentions in brand origin document
-4. Any country or region names mentioned (Nigeria, Ghana, Kenya, South Africa, West Africa, East Africa, Africa, Global, etc.)
+- Extract the PRIMARY target region/market for this project.
+- Evidence order: questionnaire > client context > brand origin > inferred.
+- Use the MOST SPECIFIC region mentioned (e.g., "Nigeria" over "West Africa").
+- If multiple regions are present, pick the primary one.
+- If nothing is clear, set region to "Nigeria" with confidence 0 and source "inferred".
 
-**Guidelines:**
-- Use the MOST SPECIFIC region mentioned (e.g., "Nigeria" is more specific than "West Africa")
-- If multiple regions mentioned, select the PRIMARY one
-- If no clear region found, use "Nigeria" as default fallback
-- Return region name in standard format (e.g., "Nigeria", "Ghana", "West Africa", "South Africa")
-- Confidence should reflect how clearly the region is stated (10 = explicitly stated, 5 = inferred, 0 = default fallback)
+**Schema (must match exactly):**
+- region: string (standard region/country/area name; no lists; no "N/A")
+- confidence: number 0-10 (10 = explicitly stated; 5 = inferred; 0 = fallback)
+- source: one of ["questionnaire", "clientContext", "brandOrigin", "inferred"]
+- reasoning: brief string explaining why you chose the region
 
-Extract the target region now.`;
+**Output requirements:**
+- Return a single JSON object ONLY (no prose, no markdown).
+- Do not include extra fields.
+- Do not return null/undefined/empty strings.
+`;
 
       const result = await llmClient.generateStructured(
         regionExtractionSchema,
@@ -308,9 +311,7 @@ Extract the target region now.`;
           ? clientContext
           : JSON.stringify(clientContext, null, 2)
       }
-- Brand Origin Document: ${
-        brandOrigin ? brandOrigin : "Not available"
-      }
+- Brand Origin Document: ${brandOrigin ? brandOrigin : "Not available"}
 
 **Task:**
 Extract the PRIMARY industry or sector this project operates in. Look for:
@@ -385,9 +386,7 @@ Extract the industry now.`;
           ? clientContext
           : JSON.stringify(clientContext, null, 2)
       }
-- Brand Origin Document: ${
-        brandOrigin ? brandOrigin : "Not available"
-      }
+- Brand Origin Document: ${brandOrigin ? brandOrigin : "Not available"}
 
 **Task:**
 Extract the PRIMARY target audience or customer segment. Look for:
@@ -462,9 +461,7 @@ Extract the target audience now.`;
           ? clientContext
           : JSON.stringify(clientContext, null, 2)
       }
-- Brand Origin Document: ${
-        brandOrigin ? brandOrigin : "Not available"
-      }
+- Brand Origin Document: ${brandOrigin ? brandOrigin : "Not available"}
 
 **Task:**
 Extract competitor company/brand names. Look for:
@@ -589,14 +586,8 @@ Extract the competitor list now.`;
         context
       );
 
-      // Validate research quality
-      const qualityValid = this.validateResearchQuality(researchData);
-      if (!qualityValid) {
-        logger.warn(
-          { slideId, slideType: slide.slideType },
-          "Research quality validation failed, but continuing with available data"
-        );
-      }
+      // Note: quality validation is handled in researchWithFallback to avoid
+      // double-checking and to keep the full data (including sources) intact.
 
       // Store research data and sources in database
       const metadataInfo = slide.metadataInfo || {};
@@ -606,9 +597,7 @@ Extract the competitor list now.`;
         where: { id: slideId },
         data: {
           researchData: researchData.data || researchData,
-          researchStatus: qualityValid
-            ? ResearchStatus.COMPLETED
-            : ResearchStatus.COMPLETED, // Still mark as completed even if quality is low
+          researchStatus: ResearchStatus.COMPLETED, // preliminary status; may be overridden by fallback flow
           metadataInfo,
           updatedAt: new Date(),
         },
@@ -619,12 +608,11 @@ Extract the competitor list now.`;
           slideId,
           slideType: slide.slideType,
           sourceCount: researchData.sources?.length || 0,
-          qualityValid,
         },
         "Research completed for slide"
       );
 
-      return researchData.data || researchData;
+      return researchData;
     } catch (error) {
       logger.error(
         {
@@ -927,13 +915,24 @@ Extract the competitor list now.`;
       // Try primary research first
       const researchData = await this.researchSlide(slide, context);
 
+      // Normalize structure for validation (ensure sources preserved)
+      const normalizedPrimary = {
+        ...researchData,
+        data: researchData.data || researchData,
+        sources:
+          researchData.sources ||
+          researchData.data?.sources ||
+          researchData.dataPoints?.sources ||
+          [],
+      };
+
       // Validate research quality
-      if (this.validateResearchQuality(researchData)) {
+      if (this.validateResearchQuality(normalizedPrimary)) {
         logger.info(
           { slideId: slide.id, slideType: slide.slideType },
           "Research quality sufficient, using primary research data"
         );
-        return researchData;
+        return normalizedPrimary;
       }
 
       // Quality insufficient - try to use cached industry data or fallback
@@ -952,8 +951,18 @@ Extract the competitor list now.`;
       );
 
       if (fallbackData && Object.keys(fallbackData).length > 0) {
+        const normalizedFallback = {
+          ...fallbackData,
+          data: fallbackData.data || fallbackData,
+          sources:
+            fallbackData.sources ||
+            fallbackData.data?.sources ||
+            fallbackData.dataPoints?.sources ||
+            [],
+        };
+
         logger.info({ slideId: slide.id }, "Using fallback industry data");
-        return fallbackData;
+        return normalizedFallback;
       }
 
       // Last resort: flag for manual review but return minimal data

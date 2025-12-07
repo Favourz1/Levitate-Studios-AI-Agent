@@ -115,10 +115,14 @@ class WorkplanArtDirectorService {
       );
 
       // Fetch supporting visuals (non-blocking failures are tolerated)
-      const searchQuery =
+      const rawSearchQuery =
         title ||
         slideData.slideType.replace(/_/g, " ").toLowerCase() ||
         "brand";
+      const searchQuery =
+        rawSearchQuery.length > 50
+          ? `${rawSearchQuery.slice(0, 47)}...`
+          : rawSearchQuery;
       let imageResults = [];
       let iconResults = [];
 
@@ -201,6 +205,7 @@ What to output (must validate against designDirectiveSchema):
 - colorPalette: stay within brand colors; ensure readable text contrast (set text color explicitly).
 - typography: pick heading/body sizes that reflect hierarchy and legibility; use provided fonts.
 - visualElements: select concise set (max 5) of icons/images/charts/graphs that reinforce the message; include URLs only when provided; match placements to layout.
+- If you suggest search queries for icons/images, keep each query concise (<=50 characters) using 3-5 keywords.
 - contentPlacement: map 3-6 meaningful content sections from the strategic copy to specific positions; include statsPosition, imagePosition, textAlignment, and contentMapping with emphasis where needed.
 - spacing: set sectionSpacing and elementSpacing for clean breathing room (use points).
 - specialInstructions: only if critical (e.g., keep accent usage sparing, avoid clutter, chart suggestion).

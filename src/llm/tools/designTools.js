@@ -70,12 +70,20 @@ const buildNounProjectAuthHeader = (url, method, params = {}) => {
   return authorization;
 };
 
+const MAX_QUERY_LEN = 50;
+
+const clampQuery = (query) => {
+  if (!query) return "";
+  if (query.length <= MAX_QUERY_LEN) return query;
+  return `${query.slice(0, MAX_QUERY_LEN - 3)}...`;
+};
+
 /**
  * Pexels image search tool
  */
 const imageSearchTool = tool({
   description:
-    "Search for relevant images for slide design using the Pexels API",
+    "Search for relevant images for slide design using the Pexels API (query must be <=50 characters).",
   parameters: z.object({
     query: z.string().describe("Search query describing the desired image"),
     imageType: z
@@ -90,7 +98,8 @@ const imageSearchTool = tool({
       throw new Error("PEXELS_API_KEY is not configured");
     }
 
-    const searchQuery = `${query} ${style}`.trim();
+    const rawQuery = `${query} ${style}`.trim();
+    const searchQuery = clampQuery(rawQuery);
     const url = new URL("https://api.pexels.com/v1/search");
     url.searchParams.set("query", searchQuery);
     url.searchParams.set("per_page", "6");
@@ -98,7 +107,7 @@ const imageSearchTool = tool({
 
     try {
       logger.info(
-        { query: searchQuery, imageType },
+        { query: searchQuery, imageType, truncated: searchQuery !== rawQuery },
         "Searching Pexels for design images"
       );
 
@@ -145,7 +154,7 @@ const imageSearchTool = tool({
  */
 const iconSearchTool = tool({
   description:
-    "Search for relevant icons for slide design using The Noun Project API",
+    "Search for relevant icons for slide design using The Noun Project API (query must be <=50 characters).",
   parameters: z.object({
     query: z.string().describe("Search query describing the desired icon"),
     imageType: z
@@ -156,8 +165,10 @@ const iconSearchTool = tool({
   }),
   execute: async ({ query, style }) => {
     const baseUrl = "https://api.thenounproject.com/v2/icon";
+    const rawQuery = `${query} ${style}`.trim();
+    const clampedQuery = clampQuery(rawQuery);
     const requestParams = {
-      query: `${query} ${style}`.trim(),
+      query: clampedQuery,
       limit: 10,
     };
 
@@ -174,7 +185,11 @@ const iconSearchTool = tool({
 
     try {
       logger.info(
-        { query: requestParams.query, limit: requestParams.limit },
+        {
+          query: requestParams.query,
+          limit: requestParams.limit,
+          truncated: clampedQuery !== rawQuery,
+        },
         "Searching The Noun Project for icons"
       );
 
