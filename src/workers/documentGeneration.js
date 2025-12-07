@@ -1726,7 +1726,6 @@ async function sendPMAdminNotificationEmail(
     };
 
     // Generate email template with action tokens (different for regeneration)
-    // TODO: Create generateBudgetTimelineNotificationTemplate and generateBudgetTimelineVariantNotificationTemplate in emailTemplateService.js
     const emailTemplate = (() => {
       switch (documentType) {
         case DocumentType.BRAND_ORIGIN:
