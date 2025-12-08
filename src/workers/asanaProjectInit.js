@@ -17,10 +17,11 @@ const {
   AsanaProjectBoardSections,
   DocumentType,
   DocumentStatus,
+  ProjectPhase,
 } = require("@/constants");
 const {
-  AsanaPendingProjectsService,
-} = require("@/services/asanaPendingProjectsService");
+  isValidProjectPhaseTransition,
+} = require("@/utils/validation/commonValidation");
 const { WorkplanPlannerService } = require("@/services/workplanPlannerService");
 const { QueueService } = require("@/queues");
 
@@ -200,8 +201,14 @@ const asanaProjectInitProcessor = async (job) => {
       "All sections created successfully"
     );
 
-    // Step 4: Store asana_project_gid and sections in database
+    // Step 4: Store asana_project_gid, finalizedBoardGid, and sections in database
     await withTransaction(async (tx) => {
+      // Get current project phase
+      const currentProject = await tx.project.findUnique({
+        where: { id: projectId },
+        select: { phase: true },
+      });
+
       // Update project with asana_project_gid
       await tx.project.update({
         where: { id: projectId },
@@ -211,7 +218,7 @@ const asanaProjectInitProcessor = async (job) => {
         },
       });
 
-      // Create or update asana_links record with sections
+      // Create or update asana_links record with sections and finalizedBoardGid
       const existingLink = await tx.asanaLink.findFirst({
         where: { projectId: projectId },
       });
@@ -220,6 +227,7 @@ const asanaProjectInitProcessor = async (job) => {
         await tx.asanaLink.update({
           where: { id: existingLink.id },
           data: {
+            finalizedBoardGid: asanaProjectGid, // Save the board GID as finalizedBoardGid
             sections: sections,
           },
         });
@@ -227,10 +235,61 @@ const asanaProjectInitProcessor = async (job) => {
         await tx.asanaLink.create({
           data: {
             projectId: projectId,
+            finalizedBoardGid: asanaProjectGid, // Save the board GID as finalizedBoardGid
             sections: sections,
             createdAt: new Date(),
           },
         });
+      }
+
+      // Transition project phase from ASANA_INIT to WORKPLAN_GENERATION
+      if (currentProject && currentProject.phase === ProjectPhase.ASANA_INIT) {
+        if (
+          isValidProjectPhaseTransition(
+            ProjectPhase.ASANA_INIT,
+            ProjectPhase.WORKPLAN_GENERATION
+          )
+        ) {
+          await tx.project.update({
+            where: { id: projectId },
+            data: {
+              phase: ProjectPhase.WORKPLAN_GENERATION,
+              updatedAt: new Date(),
+            },
+          });
+
+          // Log phase transition
+          await tx.projectPhaseLog.create({
+            data: {
+              projectId,
+              fromPhase: ProjectPhase.ASANA_INIT,
+              toPhase: ProjectPhase.WORKPLAN_GENERATION,
+              reason:
+                "Asana project initialized successfully - starting workplan generation",
+              actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+              at: new Date(),
+            },
+          });
+
+          logger.info(
+            {
+              projectId,
+              fromPhase: ProjectPhase.ASANA_INIT,
+              toPhase: ProjectPhase.WORKPLAN_GENERATION,
+              correlationId,
+            },
+            "Project phase transitioned to WORKPLAN_GENERATION"
+          );
+        } else {
+          logger.warn(
+            {
+              projectId,
+              currentPhase: currentProject.phase,
+              correlationId,
+            },
+            "Invalid phase transition from ASANA_INIT to WORKPLAN_GENERATION"
+          );
+        }
       }
     });
 
@@ -394,6 +453,7 @@ const asanaProjectInitProcessor = async (job) => {
         action: AuditActions.ASANA_PROJECT_INITIALIZED,
         details: {
           asanaProjectGid,
+          finalizedBoardGid: asanaProjectGid, // Also logged in audit
           sections,
           teamMembersCount: selectedTeamMembers?.length || 0,
           teamMembers:

@@ -34,6 +34,14 @@ const isValidProjectPhaseTransition = (fromPhase, toPhase) => {
       ProjectPhase.REJECTED,
     ],
     [ProjectPhase.QUOTE_DOCUMENT]: [
+      ProjectPhase.ASANA_INIT,
+      ProjectPhase.REJECTED,
+    ],
+    [ProjectPhase.ASANA_INIT]: [
+      ProjectPhase.WORKPLAN_GENERATION,
+      ProjectPhase.REJECTED,
+    ],
+    [ProjectPhase.WORKPLAN_GENERATION]: [
       ProjectPhase.FINALIZED,
       ProjectPhase.REJECTED,
     ],

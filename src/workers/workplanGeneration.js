@@ -11,7 +11,12 @@ const {
   ResearchStatus,
   TeamRole,
   AsanaProjectBoardSections,
+  ProjectPhase,
 } = require("@/constants");
+const {
+  isValidProjectPhaseTransition,
+} = require("@/utils/validation/commonValidation");
+const { withTransaction } = require("@/database");
 const {
   WorkplanPlannerService,
   WorkplanResearcherService,
@@ -325,6 +330,74 @@ const workplanGenerationProcessor = async (job) => {
           correlationId,
         },
       },
+    });
+
+    // Transition project phase from WORKPLAN_GENERATION to FINALIZED
+    await withTransaction(async (tx) => {
+      const currentProject = await tx.project.findUnique({
+        where: { id: projectId },
+        select: { phase: true },
+      });
+
+      if (
+        currentProject &&
+        currentProject.phase === ProjectPhase.WORKPLAN_GENERATION
+      ) {
+        if (
+          isValidProjectPhaseTransition(
+            ProjectPhase.WORKPLAN_GENERATION,
+            ProjectPhase.FINALIZED
+          )
+        ) {
+          await tx.project.update({
+            where: { id: projectId },
+            data: {
+              phase: ProjectPhase.FINALIZED,
+              updatedAt: new Date(),
+            },
+          });
+
+          // Log phase transition
+          await tx.projectPhaseLog.create({
+            data: {
+              projectId,
+              fromPhase: ProjectPhase.WORKPLAN_GENERATION,
+              toPhase: ProjectPhase.FINALIZED,
+              reason: "Workplan document generation completed successfully",
+              actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+              at: new Date(),
+            },
+          });
+
+          logger.info(
+            {
+              projectId,
+              fromPhase: ProjectPhase.WORKPLAN_GENERATION,
+              toPhase: ProjectPhase.FINALIZED,
+              correlationId,
+            },
+            "Project phase transitioned to FINALIZED"
+          );
+        } else {
+          logger.warn(
+            {
+              projectId,
+              currentPhase: currentProject.phase,
+              correlationId,
+            },
+            "Invalid phase transition from WORKPLAN_GENERATION to FINALIZED"
+          );
+        }
+      } else {
+        logger.warn(
+          {
+            projectId,
+            currentPhase: currentProject?.phase,
+            correlationId,
+          },
+          "Project not in WORKPLAN_GENERATION phase, skipping phase transition"
+        );
+      }
     });
 
     // Create Asana task for Creative Director

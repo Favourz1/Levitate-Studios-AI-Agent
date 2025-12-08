@@ -3,6 +3,8 @@ const ProjectPhase = {
   QUESTIONNAIRE: "QUESTIONNAIRE",
   BRAND_ORIGIN: "BRAND_ORIGIN",
   QUOTE_DOCUMENT: "QUOTE_DOCUMENT", // Internal phase name (was BUDGET_TIMELINE)
+  ASANA_INIT: "ASANA_INIT", // Asana project initialization phase
+  WORKPLAN_GENERATION: "WORKPLAN_GENERATION", // Workplan document generation phase
   FINALIZED: "FINALIZED",
   REJECTED: "REJECTED",
 };

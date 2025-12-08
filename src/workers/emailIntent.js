@@ -1256,7 +1256,7 @@ async function handleQuoteAcceptance(
       );
     }
 
-    // Step 7: Finalize project (move to Finalized, enqueue Asana project init)
+    // Step 7: Finalize project (move to ASANA_INIT phase, enqueue Asana project init)
     await finalizeProject(project.id, correlationId);
 
     logger.info(
@@ -2106,11 +2106,11 @@ async function finalizeProject(projectId, correlationId) {
       { correlationId }
     );
 
-    // Step 2: Update project phase to FINALIZED
+    // Step 2: Update project phase to ASANA_INIT (not FINALIZED yet - that happens after workplan)
     await transitionProjectPhaseIfNeeded(
       projectId,
-      ProjectPhase.FINALIZED,
-      "Quote accepted by client - project finalized",
+      ProjectPhase.ASANA_INIT,
+      "Quote accepted by client - starting Asana project initialization",
       correlationId
     );
 

@@ -21,6 +21,8 @@ const projectPhaseSchema = z.enum([
   ProjectPhase.QUESTIONNAIRE,
   ProjectPhase.BRAND_ORIGIN,
   ProjectPhase.QUOTE_DOCUMENT,
+  ProjectPhase.ASANA_INIT,
+  ProjectPhase.WORKPLAN_GENERATION,
   ProjectPhase.FINALIZED,
   ProjectPhase.REJECTED,
 ]);
