@@ -952,11 +952,9 @@ class AsanaPendingProjectsService {
 
 *Client Details:*
 - Company: ${client.name}
-- Email: ${client.primaryEmail}
 - Project: ${project.name}
 
 *Form Details:*
-- Form ID: ${processedData.questionnaireResponse?.formId || "N/A"}
 - Response ID: ${processedData.questionnaireResponse?.responseId || "N/A"}
 - Submitted: ${formattedDate}
 

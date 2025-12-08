@@ -882,7 +882,9 @@ class EmailTemplateService {
 
             <div class="footer">
               <p style="margin: 0;">Quote managed by Levitate Studios AI Agent<br/>
-              <a href="${appConfig.server.baseUrl}">View in Dashboard</a></p>
+              <!-- <a href="${
+                appConfig.server.baseUrl
+              }">View in Dashboard</a> -->
             </div>
           </div>
         </body>
