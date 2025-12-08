@@ -188,7 +188,7 @@ model AsanaLink {
   projectId          Int      @map("project_id")
   pendingBoardGid    String?  @map("pending_board_gid")
   finalizedBoardGid  String?  @map("finalized_board_gid")
-  sections           Json     @map("sections") @db.JsonB // name → gid mapping
+  sections           Json     @map("sections") @db.JsonB // name → gid mapping for finalized board sections gid (pending board sections are in global config) 
   pmGid              String?  @map("pm_gid")
   financeGid         String?  @map("finance_gid")
   createdAt          DateTime @default(now()) @map("created_at")
