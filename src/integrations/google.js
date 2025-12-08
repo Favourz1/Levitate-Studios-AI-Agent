@@ -939,28 +939,10 @@ class GoogleIntegration {
 
     switch (block.type) {
       case BlockType.IMAGE: {
-        if (!(block.url || block.fileId)) break;
+        if (!block.url) break;
+        // if (!(block.url || block.fileId)) break;
 
         let imageUrl = block.url;
-        if (block.fileId) {
-          try {
-            const file = await this.drive.files.get({
-              fileId: block.fileId,
-              fields: "webContentLink,webViewLink",
-            });
-            imageUrl =
-              file.data.webContentLink ||
-              file.data.webViewLink ||
-              imageUrl ||
-              null;
-          } catch (fileError) {
-            logger.warn(
-              { documentId, fileId: block.fileId, error: fileError.message },
-              "Falling back to text placeholder for image"
-            );
-            imageUrl = null;
-          }
-        }
 
         if (!imageUrl) {
           const placeholder = "[Image placeholder - could not load image]\n";
@@ -970,6 +952,26 @@ class GoogleIntegration {
           insertedLength = placeholder.length;
           break;
         }
+
+        // if (block.fileId) {
+        //   try {
+        //     const file = await this.drive.files.get({
+        //       fileId: block.fileId,
+        //       fields: "webContentLink,webViewLink",
+        //     });
+        //     imageUrl =
+        //       file.data.webContentLink ||
+        //       file.data.webViewLink ||
+        //       imageUrl ||
+        //       null;
+        //   } catch (fileError) {
+        //     logger.warn(
+        //       { documentId, fileId: block.fileId, error: fileError.message },
+        //       "Falling back to text placeholder for image"
+        //     );
+        //     imageUrl = null;
+        //   }
+        // }
 
         const width = block.width || 300;
         const height = block.height || null;
