@@ -295,7 +295,11 @@ class WorkplanDocumentBuilderService {
       },
       {
         type: "paragraph",
-        text: `Generated: ${new Date().toISOString()}`,
+        text: `Generated: ${new Date().toLocaleDateString("en-NG", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })}`,
       },
       { type: "spacer", height: 24 },
     ];

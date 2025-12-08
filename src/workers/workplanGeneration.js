@@ -950,8 +950,14 @@ async function sendCompletionEmail(
     // Fetch Google Drive links for project documents
     // Include accepted brand origin, selected accepted quote, and completed workplan
     const projectDocuments = [];
+    const processedDocumentIds = new Set(); // Track processed document IDs to prevent duplicates
     if (project.documents && project.documents.length > 0) {
       for (const doc of project.documents) {
+        // Skip if this document has already been processed
+        if (processedDocumentIds.has(doc.id)) {
+          continue;
+        }
+
         // Process accepted brand origin, accepted quote with selectedQuoteId, or completed workplan
         const isAcceptedBrandOrigin =
           doc.type === DocumentType.BRAND_ORIGIN &&
@@ -980,6 +986,7 @@ async function sendCompletionEmail(
                 status: doc.status,
                 driveLink: fileMetadata.webViewLink,
               });
+              processedDocumentIds.add(doc.id); // Mark this document as processed
             }
           } catch (driveError) {
             logger.warn(

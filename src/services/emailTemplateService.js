@@ -213,6 +213,7 @@ class EmailTemplateService {
           <li>Sections created: "To Do", "In Progress", "In Review", "Completed"</li>
           <li>Team members selected and added to the project</li>
           <li>Project description generated and added</li>
+          <li>Workplan document generated and added for creative director review.</li>
         </ul>
         
         ${documentLinksHtml}
@@ -221,9 +222,7 @@ class EmailTemplateService {
         <p>The project is now ready for task assignment. Team members have been added to the Asana project and can start working on tasks.</p>
         
         ${asanaLink}
-        
-        <p><strong>Note:</strong> No tasks have been created or assigned yet. You can now proceed with task creation and assignment as needed.</p>
-        
+                
         <hr>
         <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
       `;
