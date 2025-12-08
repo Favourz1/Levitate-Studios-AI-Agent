@@ -453,10 +453,7 @@ class FormSubmissionService {
         );
 
       await brevoIntegration.sendTransactionalEmail({
-        to:
-          appConfig.server.nodeEnv === "production"
-            ? [pmMember.email, appConfig.server.adminEmail]
-            : [pmMember.email],
+        to: [pmMember.email, appConfig.server.adminEmail],
         subject: template.subject,
         htmlContent: template.htmlContent,
         // replyTo: emailThread.replyToAddress,

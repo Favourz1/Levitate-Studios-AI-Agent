@@ -507,11 +507,7 @@ async function sendQuoteNotifications(
   }
 
   // For admin, we need to find admin user ID in team_members table
-  if (
-    appConfig.server.adminEmail
-    // &&
-    // appConfig.server.nodeEnv === "production"
-  ) {
+  if (appConfig.server.adminEmail) {
     recipients.add(appConfig.server.adminEmail);
     // Fetch admin team member ID from database
     try {

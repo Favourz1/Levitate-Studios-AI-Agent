@@ -1784,10 +1784,7 @@ async function sendPMAdminNotificationEmail(
     });
 
     // Also send to admin in production with separate tokens
-    if (
-      appConfig.server.nodeEnv === "production" &&
-      appConfig.server.adminEmail
-    ) {
+    if (appConfig.server.adminEmail) {
       // Find admin user for tokens
       const adminUser = await prisma.teamMember.findFirst({
         where: {
