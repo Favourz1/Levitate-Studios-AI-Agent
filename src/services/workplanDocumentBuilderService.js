@@ -28,38 +28,25 @@ class WorkplanDocumentBuilderService {
     const researchSources = slide?.metadataInfo?.researchSources || [];
     const designDirectives = slide?.designDirectives || {};
 
+    // Slide Title (Heading 1)
     blocks.push({
       type: "heading",
       level: 1,
       text: slide?.title || slide?.slideType || `Slide ${slide?.slideNumber}`,
     });
 
-    // Research Data
-    blocks.push({ type: "heading", level: 2, text: "Research Data" });
-    blocks.push({
-      type: "paragraph",
-      text:
-        this.formatResearchData(slide?.researchData) ||
-        "[Research data not available]",
-    });
-
-    if (researchSources.length > 0) {
+    // Slide Type (Heading 2 - smaller heading below title)
+    if (slide?.slideType) {
       blocks.push({
-        type: "bullets",
-        items: researchSources.map((source) =>
-          [
-            source.source_title || source.title || "Source",
-            source.source_url || source.url || "",
-          ]
-            .filter(Boolean)
-            .join(": ")
-        ),
+        type: "heading",
+        level: 3,
+        text: `Type of slide: ${this.formatSlideType(slide.slideType)}`,
       });
     }
 
     blocks.push({ type: "spacer", height: 24 });
 
-    // Content
+    // Content (moved to top)
     blocks.push({ type: "heading", level: 2, text: "Content" });
     blocks.push({
       type: "paragraph",
@@ -68,7 +55,7 @@ class WorkplanDocumentBuilderService {
 
     blocks.push({ type: "spacer", height: 24 });
 
-    // Design Directives
+    // Design Directives (moved to middle)
     blocks.push({ type: "heading", level: 2, text: "Design Directives" });
     blocks.push({
       type: "paragraph",
@@ -114,6 +101,14 @@ class WorkplanDocumentBuilderService {
             url: element.url,
             width: element.size === "SMALL" ? 180 : 280,
           });
+          // Add link block below each image/icon/visual element
+          if (element.url) {
+            blocks.push({
+              type: "link",
+              text: element.url,
+              url: element.url,
+            });
+          }
         });
       }
     }
@@ -140,6 +135,31 @@ class WorkplanDocumentBuilderService {
             option.big_idea_text || option.bigIdeaText || ""
           } — ${rationale}`;
         }),
+      });
+    }
+
+    blocks.push({ type: "spacer", height: 24 });
+
+    // Research Data (moved to bottom)
+    blocks.push({ type: "heading", level: 2, text: "Research Data" });
+
+    // Only show bullet points list, no JSON dump
+    if (researchSources.length > 0) {
+      blocks.push({
+        type: "bullets",
+        items: researchSources.map((source) =>
+          [
+            source.source_title || source.title || "Source",
+            source.source_url || source.url || "",
+          ]
+            .filter(Boolean)
+            .join(": ")
+        ),
+      });
+    } else {
+      blocks.push({
+        type: "paragraph",
+        text: "[Research data not available]",
       });
     }
 
@@ -284,12 +304,13 @@ class WorkplanDocumentBuilderService {
       { type: "heading", level: 1, text: "Table of Contents" },
       {
         type: "bullets",
-        items: workplanDoc.workplanSlides.map(
-          (slide) =>
-            `${slide.slideNumber || ""}. ${
-              slide.title || slide.slideType || "Slide"
-            }`
-        ),
+        items: workplanDoc.workplanSlides.map((slide) => {
+          const title = slide.title || slide.slideType || "Slide";
+          const slideType = slide.slideType
+            ? ` (${this.formatSlideType(slide.slideType)})`
+            : "";
+          return `${slide.slideNumber || ""}. ${title}${slideType}`;
+        }),
       },
       { type: "spacer", height: 18 },
     ];
@@ -418,6 +439,20 @@ Generated: ${new Date().toLocaleDateString("en-NG", {
       .join("\n\n");
 
     return `${header}\n\n${slideTexts}`;
+  }
+
+  /**
+   * Format slide type enum value to human-readable text.
+   * @param {string} slideType - Slide type enum value
+   * @returns {string} Formatted slide type
+   * @private
+   */
+  static formatSlideType(slideType) {
+    if (!slideType) return "";
+
+    // Convert enum value to readable format
+    // e.g., "INDUSTRY_STRENGTHS" -> "Industry Strengths"
+    return this.toTitleCase(slideType);
   }
 
   /**

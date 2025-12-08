@@ -905,9 +905,7 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
   - Convert slide data to Google Docs blocks array
   - Structure:
     1. Slide Title (Heading 1)
-    2. Research Data Section (Heading 2)
-       - Research content (formatted paragraph)
-       - Sources (bullets) from `metadataInfo.researchSources`
+    2. Slide Type (Heading 2) - "Type of slide: {formatted slide type}"
     3. Spacer
     4. Content Section (Heading 2) - THE ACTUAL CONTENT FOR THE SLIDE
        - Strategic copy (formatted paragraph)
@@ -916,6 +914,11 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
        - Design spec (formatted paragraph)
        - Content Placement Instructions (Heading 3) if `contentMapping` exists
        - Visual elements (if any) with image blocks
+       - Link blocks below each image/icon/visual element with URL
+    7. Spacer
+    8. Research Data Section (Heading 2)
+       - Sources (bullets) from `metadataInfo.researchSources` only (no JSON dump)
+       - Show "[Research data not available]" if no sources
   - Return blocks array
   - Reference: `AI-Context/Implementation-Plan-Step-8.md` → Section 7.3
 
@@ -964,7 +967,11 @@ EVEN THOUGH THEY ARE BREAKING CHANGES WITH THE METHOD YOU CAN PROCEED.
 - Call `WorkplanDocumentBuilderService.buildGoogleDoc(documentId)`
 - Verify Google Doc created successfully
 - Check document structure: cover page, TOC, all slides
-- Verify each slide has: Research Data → Content → Design Directives sections
+- Verify each slide has: Content → Design Directives → Research Data sections
+- Verify slide type heading appears below slide title
+- Verify TOC includes slide type in format: "Title (Slide Type)"
+- Verify links appear below images/icons/visual elements
+- Verify research data shows only bullet points (no JSON dump)
 - Test with Big Idea slide (2 options)
 - Verify images/icons inserted correctly
 - Check formatting and styling
@@ -1417,7 +1424,7 @@ The implementation is complete when:
 2. ✅ All checkpoints have been passed
 3. ✅ Workplan generation completes successfully for all service types
 4. ✅ All 5 agents execute correctly in sequence
-5. ✅ Google Doc is created with proper structure (Research → Content → Design)
+5. ✅ Google Doc is created with proper structure (Content → Design Directives → Research Data)
 6. ✅ Research data has traceable sources
 7. ✅ Content synthesis follows BRICS framework
 8. ✅ Design directives are complete and actionable

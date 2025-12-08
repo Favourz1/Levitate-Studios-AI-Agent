@@ -895,10 +895,8 @@ Google Doc Structure:
 ├── Table of Contents (Auto-generated)
 │
 ├── Slide 1: Industry Strengths
-│   ├── [RESEARCH DATA SECTION]
-│   │   ├── Population: 226M
-│   │   ├── Growth Rate: 15% CAGR
-│   │   └── Sources: [URL1, URL2, URL3]
+│   ├── Slide Title (Heading 1)
+│   ├── Type of slide: Industry Strengths (Heading 3)
 │   │
 │   ├── [CONTENT SECTION]
 │   │   ├── Selected Content/Writings:
@@ -906,19 +904,25 @@ Google Doc Structure:
 │   │   ├── [Formatted and ready for design]
 │   │   └── [Includes all key points, statistics, and insights]
 │   │
-│   └── [DESIGN DIRECTIVES SECTION]
-│       ├── Layout: Split Left-Right
-│       ├── Colors: Primary #1A1A1A, Accent #FF6B35
-│       ├── Icons: [Icon URL 1, Icon URL 2]
-│       ├── Images: [Image URL 1]
-│       └── Content Placement:
-│           ├── Population stat → LEFT, with icon [Icon URL 1]
-│           ├── Growth rate → LEFT, with chart
-│           ├── "What this means" → RIGHT, emphasis HIGH
-│           └── Supporting image → RIGHT, size LARGE
+│   ├── [DESIGN DIRECTIVES SECTION]
+│   │   ├── Layout: Split Left-Right
+│   │   ├── Colors: Primary #1A1A1A, Accent #FF6B35
+│   │   ├── Icons: [Icon URL 1, Icon URL 2]
+│   │   │   └── [Link to Icon URL 1]
+│   │   │   └── [Link to Icon URL 2]
+│   │   ├── Images: [Image URL 1]
+│   │   │   └── [Link to Image URL 1]
+│   │   └── Content Placement:
+│   │       ├── Population stat → LEFT, with icon [Icon URL 1]
+│   │       ├── Growth rate → LEFT, with chart
+│   │       ├── "What this means" → RIGHT, emphasis HIGH
+│   │       └── Supporting image → RIGHT, size LARGE
+│   │
+│   └── [RESEARCH DATA SECTION]
+│       └── Sources: [URL1, URL2, URL3] (bullet points only, no JSON dump)
 │
 ├── Slide 2: Opportunity in Market
-│   └── [Same structure: Research Data → Content → Design Directives]
+│   └── [Same structure: Content → Design Directives → Research Data]
 │
 └── ... (all slides)
 ```
@@ -939,29 +943,15 @@ class WorkplanDocumentBuilderService {
       level: 1,
     });
 
-    // Research Data Section (Heading 2)
-    blocks.push({
-      type: "heading",
-      text: "Research Data",
-      level: 2,
-    });
-
-    // Research content (formatted)
-    blocks.push({
-      type: "paragraph",
-      text: this.formatResearchData(slide.researchData),
-    });
-
-    // Sources (bullets) - from metadata_info.researchSources
-    const researchSources = slide.metadataInfo?.researchSources || [];
-    if (researchSources.length > 0) {
+    // Slide Type (Heading 2 - smaller heading below title)
+    if (slide.slideType) {
       blocks.push({
-        type: "bullets",
-        items: researchSources.map((s) => `${s.source_title}: ${s.source_url}`),
+        type: "heading",
+        text: `Type of slide: ${this.formatSlideType(slide.slideType)}`,
+        level: 2,
       });
     }
 
-    // Spacer
     blocks.push({ type: "spacer", height: 24 });
 
     // Content Section (Heading 2) - THE ACTUAL CONTENT FOR THE SLIDE
@@ -977,7 +967,6 @@ class WorkplanDocumentBuilderService {
       text: slide.content_copy || "[Content to be generated]",
     });
 
-    // Spacer
     blocks.push({ type: "spacer", height: 24 });
 
     // Design Directives Section (Heading 2)
@@ -1021,7 +1010,7 @@ class WorkplanDocumentBuilderService {
       });
     }
 
-    // Visual elements (if any)
+    // Visual elements (if any) - with links below each image/icon
     if (slide.designDirectives.visualElements?.length > 0) {
       blocks.push({
         type: "heading",
@@ -1036,7 +1025,37 @@ class WorkplanDocumentBuilderService {
             url: element.url,
             width: this.getImageWidth(element.size),
           });
+          // Add link block below each image/icon/visual element
+          blocks.push({
+            type: "link",
+            text: element.url,
+            url: element.url,
+          });
         }
+      });
+    }
+
+    blocks.push({ type: "spacer", height: 24 });
+
+    // Research Data Section (Heading 2) - moved to bottom
+    blocks.push({
+      type: "heading",
+      text: "Research Data",
+      level: 2,
+    });
+
+    // Sources (bullets) - from metadata_info.researchSources
+    // Only show bullet points list, no JSON dump
+    const researchSources = slide.metadataInfo?.researchSources || [];
+    if (researchSources.length > 0) {
+      blocks.push({
+        type: "bullets",
+        items: researchSources.map((s) => `${s.source_title}: ${s.source_url}`),
+      });
+    } else {
+      blocks.push({
+        type: "paragraph",
+        text: "[Research data not available]",
       });
     }
 
@@ -1056,7 +1075,7 @@ class WorkplanDocumentBuilderService {
     // 2. Fetch all slides with research and design data (where document_id = documentId)
     // 3. Generate cover page blocks
     // 4. Generate TOC blocks
-    // 5. For each slide: convert to blocks (Research Data → Content → Design Directives)
+    // 5. For each slide: convert to blocks (Content → Design Directives → Research Data)
     // 6. Assemble all blocks
     // 7. Call googleIntegration.createFormattedDocument (fixed/rebuilt)
     // 8. Update document.status to COMPLETED
