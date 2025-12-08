@@ -1008,9 +1008,6 @@ async function sendCompletionEmail(
       (r) => r.role === TeamRole.PROJECT_MANAGER
     );
 
-    // Use projectWithDocuments if requeried, otherwise use original project
-    const projectForEmail = projectWithDocuments || project;
-
     // Send emails to Admin/Manager (with financials)
     if (adminManagerRecipients.length > 0) {
       try {
@@ -1100,7 +1097,7 @@ async function sendCompletionEmail(
             EmailTemplateService.generateWorkplanCompletionTemplate(
               project,
               googleDocUrl,
-              slideCount || projectDocuments.length || 0
+              slideCount ?? projectDocuments.length ?? 0
             );
 
           await brevoIntegration.sendTransactionalEmail({
@@ -1149,7 +1146,6 @@ async function sendCompletionEmail(
           documentsCount: projectDocuments.length,
           correlationId,
         },
-        at: new Date(),
       },
     });
   } catch (error) {

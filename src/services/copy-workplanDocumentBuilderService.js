@@ -17,6 +17,20 @@ const logger = createLogger("service:workplan-document-builder");
 const prisma = getPrismaClient();
 
 class WorkplanDocumentBuilderService {
+  static SAFE_TEXT_LIMIT = 5000;
+  static MAX_SOURCES_DISPLAY = 20; // Limit sources to prevent oversized payloads
+  static MAX_RESEARCH_DATA_LENGTH = 3000; // Limit research data text
+
+  /**
+   * Normalize text to a safe length for Docs.
+   * @private
+   */
+  static safeText(text, fallback = "") {
+    if (!text) return fallback;
+    const str = String(text).trim();
+    if (str.length <= this.SAFE_TEXT_LIMIT) return str;
+    return `${str.slice(0, this.SAFE_TEXT_LIMIT - 3)}...`;
+  }
   /**
    * Convert a slide record into an ordered array of blocks understood by
    * googleIntegration.createFormattedDocument.
@@ -31,30 +45,58 @@ class WorkplanDocumentBuilderService {
     blocks.push({
       type: "heading",
       level: 1,
-      text: slide?.title || slide?.slideType || `Slide ${slide?.slideNumber}`,
+      text: this.safeText(
+        slide?.title || slide?.slideType || `Slide ${slide?.slideNumber}`
+      ),
     });
 
     // Research Data
     blocks.push({ type: "heading", level: 2, text: "Research Data" });
     blocks.push({
       type: "paragraph",
-      text:
+      text: this.safeText(
         this.formatResearchData(slide?.researchData) ||
-        "[Research data not available]",
+          "[Research data not available]"
+      ),
     });
 
     if (researchSources.length > 0) {
-      blocks.push({
-        type: "bullets",
-        items: researchSources.map((source) =>
-          [
-            source.source_title || source.title || "Source",
-            source.source_url || source.url || "",
-          ]
-            .filter(Boolean)
-            .join(": ")
-        ),
-      });
+      // Deduplicate sources by URL and limit count to prevent oversized payloads
+      const seenUrls = new Set();
+      const uniqueSources = researchSources
+        .filter((source) => {
+          const url = source.source_url || source.url || "";
+          if (!url || seenUrls.has(url)) return false;
+          seenUrls.add(url);
+          return true;
+        })
+        .slice(0, this.MAX_SOURCES_DISPLAY); // Limit to MAX_SOURCES_DISPLAY
+
+      const sourceItems = uniqueSources
+        .map((source) => {
+          const title = source.source_title || source.title || "Source";
+          const url = source.source_url || source.url || "";
+          if (!title && !url) return null;
+          return title && url ? `${title}: ${url}` : title || url;
+        })
+        .filter((item) => item && item.trim().length > 0)
+        .map((item) => this.safeText(item, ""))
+        .filter((item) => item && item.trim().length > 0);
+
+      if (sourceItems.length > 0) {
+        // If we truncated sources, add a note
+        if (researchSources.length > this.MAX_SOURCES_DISPLAY) {
+          sourceItems.push(
+            `... and ${
+              researchSources.length - this.MAX_SOURCES_DISPLAY
+            } more sources (truncated for display)`
+          );
+        }
+        blocks.push({
+          type: "bullets",
+          items: sourceItems,
+        });
+      }
     }
 
     blocks.push({ type: "spacer", height: 24 });
@@ -63,7 +105,7 @@ class WorkplanDocumentBuilderService {
     blocks.push({ type: "heading", level: 2, text: "Content" });
     blocks.push({
       type: "paragraph",
-      text: slide?.contentCopy || "[Content to be generated]",
+      text: this.safeText(slide?.contentCopy || "[Content to be generated]"),
     });
 
     blocks.push({ type: "spacer", height: 24 });
@@ -72,9 +114,10 @@ class WorkplanDocumentBuilderService {
     blocks.push({ type: "heading", level: 2, text: "Design Directives" });
     blocks.push({
       type: "paragraph",
-      text:
+      text: this.safeText(
         this.formatDesignDirectives(designDirectives) ||
-        "[Design directives pending]",
+          "[Design directives pending]"
+      ),
     });
 
     // Content placement instructions
@@ -84,23 +127,27 @@ class WorkplanDocumentBuilderService {
         level: 3,
         text: "Content Placement Instructions",
       });
-      blocks.push({
-        type: "bullets",
-        items: designDirectives.contentPlacement.contentMapping.map(
-          (mapping) => {
-            let line = `${mapping.contentSection || "Content"} → ${
-              mapping.placement || "TOP"
-            }`;
-            if (mapping.visualElement) {
-              line += `, with ${mapping.visualElement}`;
-            }
-            if (mapping.emphasis && mapping.emphasis !== "NORMAL") {
-              line += ` (${mapping.emphasis} emphasis)`;
-            }
-            return line;
+      const mappingItems = designDirectives.contentPlacement.contentMapping
+        .map((mapping) => {
+          let line = `${mapping.contentSection || "Content"} → ${
+            mapping.placement || "TOP"
+          }`;
+          if (mapping.visualElement) {
+            line += `, with ${mapping.visualElement}`;
           }
-        ),
-      });
+          if (mapping.emphasis && mapping.emphasis !== "NORMAL") {
+            line += ` (${mapping.emphasis} emphasis)`;
+          }
+          return this.safeText(line);
+        })
+        .filter((item) => item && item.trim().length > 0);
+
+      if (mappingItems.length > 0) {
+        blocks.push({
+          type: "bullets",
+          items: mappingItems,
+        });
+      }
     }
 
     // Visual elements (insert images if URLs exist)
@@ -136,9 +183,11 @@ class WorkplanDocumentBuilderService {
             option.reason ||
             option.reasoning ||
             "Rationale not provided";
-          return `${label}: ${
-            option.big_idea_text || option.bigIdeaText || ""
-          } — ${rationale}`;
+          return this.safeText(
+            `${label}: ${
+              option.big_idea_text || option.bigIdeaText || ""
+            } — ${rationale}`
+          );
         }),
       });
     }
@@ -148,23 +197,67 @@ class WorkplanDocumentBuilderService {
 
   /**
    * Format research data into human-readable text.
+   * Truncates large objects and limits output to prevent Google Docs API errors.
    * @param {Object|string|null} researchData
    * @returns {string}
    */
   static formatResearchData(researchData) {
     if (!researchData) return "";
-    if (typeof researchData === "string") return researchData.trim();
-
-    const entries = Object.entries(researchData || {})
-      .filter(([, value]) => value !== undefined && value !== null)
-      .map(
-        ([key, value]) =>
-          `${this.toTitleCase(key)}: ${
-            typeof value === "object" ? JSON.stringify(value) : value
-          }`
+    if (typeof researchData === "string") {
+      return this.safeText(
+        researchData.substring(0, this.MAX_RESEARCH_DATA_LENGTH)
       );
+    }
 
-    return entries.join("\n");
+    // Handle nested research data structure (data.sources pattern)
+    let dataToFormat = researchData;
+    if (researchData.data && typeof researchData.data === "object") {
+      dataToFormat = researchData.data;
+    }
+
+    const entries = Object.entries(dataToFormat || {})
+      .filter(([, value]) => value !== undefined && value !== null)
+      .slice(0, 20) // Limit to 20 top-level entries
+      .map(([key, value]) => {
+        let formattedValue;
+
+        if (typeof value === "object") {
+          // For objects, extract key information instead of full JSON dump
+          if (Array.isArray(value)) {
+            formattedValue = `[${value.length} items]`;
+          } else if (value.value !== undefined) {
+            // Market data structure: {value, unit, region, sources}
+            formattedValue = `${value.value} ${value.unit || ""} (${
+              value.region || ""
+            })`;
+          } else if (value.content) {
+            // Research content structure
+            formattedValue = this.safeText(
+              String(value.content).substring(0, 200)
+            );
+          } else {
+            // Generic object - limit JSON stringification
+            const jsonStr = JSON.stringify(value);
+            formattedValue = this.safeText(jsonStr.substring(0, 300));
+            if (jsonStr.length > 300) {
+              formattedValue += "... (truncated)";
+            }
+          }
+        } else {
+          formattedValue = this.safeText(String(value).substring(0, 500));
+        }
+
+        return `${this.toTitleCase(key)}: ${formattedValue}`;
+      });
+
+    const formatted = entries.join("\n");
+
+    // Final truncation to prevent oversized blocks
+    if (formatted.length > this.MAX_RESEARCH_DATA_LENGTH) {
+      return `${formatted.substring(0, this.MAX_RESEARCH_DATA_LENGTH - 3)}...`;
+    }
+
+    return formatted;
   }
 
   /**
@@ -174,7 +267,7 @@ class WorkplanDocumentBuilderService {
    */
   static formatDesignDirectives(directives) {
     if (!directives) return "";
-    if (typeof directives === "string") return directives.trim();
+    if (typeof directives === "string") return this.safeText(directives);
 
     const {
       layoutType,
@@ -185,7 +278,7 @@ class WorkplanDocumentBuilderService {
     } = directives;
 
     const lines = [];
-    if (layoutType) lines.push(`Layout: ${layoutType}`);
+    if (layoutType) lines.push(`Layout: ${this.safeText(layoutType)}`);
     if (colorPalette) {
       lines.push(
         `Colors: primary ${colorPalette.primary}, secondary ${colorPalette.secondary}, accent ${colorPalette.accent}, background ${colorPalette.background}, text ${colorPalette.text}`
@@ -206,10 +299,10 @@ class WorkplanDocumentBuilderService {
       );
     }
     if (specialInstructions) {
-      lines.push(`Notes: ${specialInstructions}`);
+      lines.push(`Notes: ${this.safeText(specialInstructions)}`);
     }
 
-    return lines.join("\n");
+    return this.safeText(lines.join("\n"));
   }
 
   /**
@@ -257,7 +350,6 @@ class WorkplanDocumentBuilderService {
     const coverBlocks = [
       {
         type: "image",
-        fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
         url: BrandAssets.LEVITATE_LOGO_URL,
         width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
         height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
@@ -398,11 +490,7 @@ class WorkplanDocumentBuilderService {
   static buildSnapshotText(workplanDoc, slides) {
     const header = `Workplan: ${workplanDoc.project?.name || workplanDoc.id}
 Client: ${workplanDoc.project?.client?.name || "Unknown"}
-Generated: ${new Date().toLocaleDateString("en-NG", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    })}`;
+Generated: ${new Date().toISOString()}`;
 
     const slideTexts = slides
       .map((slide) => {
