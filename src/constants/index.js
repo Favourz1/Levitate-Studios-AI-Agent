@@ -147,19 +147,19 @@ const BrandAssets = {
 // Levitate brand guidelines for design directives
 const LEVITATE_BRAND_GUIDELINES = {
   colors: {
-    primary: "#1A1A1A",
-    secondary: "#FFFFFF",
-    accent: "#FF6B35",
-    background: "#F5F5F5",
+    primary: "#1AE5FF", // Electric Cyan: Use for primary buttons (with dark text) and hero graphics.
+    secondary: "#0F172A", // Deep Navy/Charcoal: Use for headings, text, and structural UI elements.
+    accent: "#7C3AED", // Electric Violet: Use for gradients, subtle glows, or secondary actions.
+    background: "#FFFFFF", // Pure White: Keeps the "Levitate" feel airy, clean, and weightless.
   },
   typography: {
-    headingFont: "Inter Bold",
-    bodyFont: "Inter Regular",
-    headingSizes: [32, 24, 18],
-    bodySize: 14,
+    headingFont: "Space Grotesk Bold", // Changed to a more futuristic/tech display font to match the cyan.
+    bodyFont: "Inter Regular", // Kept clean for readability.
+    headingSizes: [40, 32, 24], // Increased slightly to allow the lighter colors to have more visual weight.
+    bodySize: 16, // Increased from 14px for better modern accessibility standards.
   },
-  iconStyle: "Minimalist, line-based",
-  imageStyle: "High-quality, professional, authentic",
+  iconStyle: "Duotone, rounded edges", // "Duotone" allows you to use both the Primary and Accent colors in one icon.
+  imageStyle: "High-contrast, futuristic, utilizing negative space", // "Authentic" clashes with Neon; "Futuristic" aligns better.
 };
 
 // Design layout types for workplan slides
