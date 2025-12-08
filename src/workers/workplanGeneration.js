@@ -341,7 +341,8 @@ const workplanGenerationProcessor = async (job) => {
       project.asanaProjectGid,
       correlationId,
       googleDocUrl,
-      slides.length
+      slides.length,
+      buildResult.driveFileId
     );
 
     const duration = Date.now() - startTime;
@@ -776,13 +777,17 @@ async function createWorkplanReviewTask(
  * @param {number} projectId - Project ID
  * @param {string} asanaProjectGid - Asana project GID
  * @param {string} correlationId - Correlation ID
+ * @param {string} googleDocUrl - Google Doc URL
+ * @param {number} slideCount - Number of slides
+ * @param {string} driveFileId - Google Drive file ID for sharing
  */
 async function sendCompletionEmail(
   projectId,
   asanaProjectGid,
   correlationId,
   googleDocUrl,
-  slideCount
+  slideCount,
+  driveFileId
 ) {
   try {
     logger.info(
@@ -945,6 +950,55 @@ async function sendCompletionEmail(
         "No recipients found for project initialization completion email"
       );
       return;
+    }
+
+    // Share workplan document with all recipients (Admin, Managers, PM, Creative Director)
+    if (driveFileId && googleDocUrl) {
+      try {
+        // Get Creative Director email (if not already in recipients)
+        const creativeDirector = await getCreativeDirector(projectId);
+        const allRecipientEmails = new Set(
+          recipients.map((r) => r.email.toLowerCase())
+        );
+
+        // Add Creative Director if not already included
+        if (creativeDirector && creativeDirector.email) {
+          allRecipientEmails.add(creativeDirector.email.toLowerCase());
+        }
+
+        // Convert to array of recipient objects for sharing
+        const shareRecipients = Array.from(allRecipientEmails).map((email) => ({
+          email,
+          role: "reader",
+          options: { sendNotification: false },
+        }));
+
+        if (shareRecipients.length > 0) {
+          await googleIntegration.shareDocument(driveFileId, shareRecipients);
+
+          logger.info(
+            {
+              projectId,
+              driveFileId,
+              recipientCount: shareRecipients.length,
+              recipients: shareRecipients.map((r) => r.email),
+              correlationId,
+            },
+            "Workplan document shared with all completion email recipients"
+          );
+        }
+      } catch (shareError) {
+        logger.error(
+          {
+            projectId,
+            driveFileId,
+            error: shareError.message,
+            correlationId,
+          },
+          "Failed to share workplan document with recipients (non-fatal)"
+        );
+        // Don't throw - this shouldn't fail the main workflow
+      }
     }
 
     // Fetch Google Drive links for project documents
