@@ -2429,7 +2429,8 @@ class EmailTemplateService {
                   <li>Select appropriate team members based on project requirements</li>
                   <li>Add team members to the Asana project</li>
                   <li>Generate project description (excluding financials)</li>
-                  <li>Send completion notification to Admin, Manager, and PM</li>
+                  <li>Generate workplan document for creative director review</li>
+                  <li>Send completion notification to Admin, Manager, PM, and Creative Director</li>
                 </ol>
               </div>
             </div>
