@@ -84,6 +84,7 @@ class WorkplanArtDirectorService {
       const title = slideData.title || slideData.slideType;
       const normalizedContent =
         contentCopy || slideData.contentCopy || "[Content pending synthesis]";
+      const sanitizedContent = this.truncateContent(normalizedContent, 4000);
 
       logger.info(
         {
@@ -152,7 +153,7 @@ class WorkplanArtDirectorService {
         );
       }
 
-      const fallbackVisuals = [
+      let fallbackVisuals = [
         ...imageResults.slice(0, 2).map((image) => ({
           type: "IMAGE",
           description: image.description || "Supporting image",
@@ -170,63 +171,152 @@ class WorkplanArtDirectorService {
         })),
       ];
 
-      // Build prompt for LLM
-      const brandGuidelines = LEVITATE_BRAND_GUIDELINES;
-      const prompt = `
-You are the Art Director for Levitate Studios. Produce production-ready, strictly schema-compliant design directives that let a designer execute the slide without guesswork.
+      // Ensure at least one placeholder visual element if nothing was retrieved
+      if (fallbackVisuals.length === 0) {
+        fallbackVisuals = [
+          {
+            type: "ICON",
+            description: "Placeholder icon – add a relevant graphic",
+            placement: "LEFT",
+            size: "SMALL",
+          },
+        ];
+      }
 
-Context:
-- Slide Title: ${title}
-- Slide Type: ${slideData.slideType}
-- Recommended Layout: ${layoutType}
-- Service Type: ${context.serviceType || "GENERAL"}
-- Strategic Copy (place on slide): ${normalizedContent}
-- Brand Guidelines:
-  • Colors — primary ${brandGuidelines.colors.primary}, secondary ${
+      // Build prompt for LLM - optimized for schema compliance
+      const brandGuidelines = LEVITATE_BRAND_GUIDELINES;
+
+      // Truncate visual candidates list to prevent prompt bloat
+      const visualCandidatesText = fallbackVisuals
+        .slice(0, 5) // Limit to 5 visuals max
+        .map((v) => `${v.type}:${v.description || "Asset"}:${v.url || "none"}`)
+        .join("|");
+
+      const prompt = `You are the Art Director for Levitate Studios. Produce production-ready, strictly schema-compliant design directives that let a designer execute the slide without guesswork. Generate design directives matching designDirectiveSchema exactly.
+
+Slide: ${title} (${slideData.slideType})
+Layout: ${layoutType}
+Service: ${context.serviceType || "GENERAL"}
+
+Brand Colors: primary=${brandGuidelines.colors.primary}, secondary=${
         brandGuidelines.colors.secondary
-      }, accent ${brandGuidelines.colors.accent}, background ${
+      }, accent=${brandGuidelines.colors.accent}, background=${
         brandGuidelines.colors.background
       }
-  • Typography — heading ${
-    brandGuidelines.typography.headingFont
-  } (sizes ${brandGuidelines.typography.headingSizes.join("/")}), body ${
+Brand Fonts: heading=${
+        brandGuidelines.typography.headingFont
+      } (${brandGuidelines.typography.headingSizes.join("/")}), body=${
         brandGuidelines.typography.bodyFont
       } (${brandGuidelines.typography.bodySize}px)
-  • Icon Style — ${brandGuidelines.iconStyle}
-  • Image Style — ${brandGuidelines.imageStyle}
+Style: icons=${brandGuidelines.iconStyle}, images=${brandGuidelines.imageStyle}
 
-Available visual candidates (use only if helpful, otherwise ignore):
-${fallbackVisuals
-  .map((v) => `- ${v.type}: ${v.description || "Asset"} (${v.url || "no-url"})`)
-  .join("\n")}
+Content: ${sanitizedContent.substring(0, 3000)}
 
-What to output (must validate against designDirectiveSchema):
-- layoutType: choose the best layout for this slide from the provided layout enum.
-- colorPalette: stay within brand colors; ensure readable text contrast (set text color explicitly).
-- typography: pick heading/body sizes that reflect hierarchy and legibility; use provided fonts.
-- visualElements: select concise set (max 5) of icons/images/charts/graphs that reinforce the message; include URLs only when provided; match placements to layout.
-- If you suggest search queries for icons/images, keep each query concise (<=50 characters) using 3-5 keywords.
-- contentPlacement: map 3-6 meaningful content sections from the strategic copy to specific positions; include statsPosition, imagePosition, textAlignment, and contentMapping with emphasis where needed.
-- spacing: set sectionSpacing and elementSpacing for clean breathing room (use points).
-- specialInstructions: only if critical (e.g., keep accent usage sparing, avoid clutter, chart suggestion).
+Visuals: ${visualCandidatesText || "none"}
 
-Rules:
-- Do NOT invent brand colors or fonts; use the ones given.
-- Keep directives concise, explicit, and actionable—no fluff.
-- If visual assets are weak or missing URLs, still provide directives but keep visualElements minimal.
-- Ensure the JSON returned can be parsed by the schema with no extra fields.
-`;
+Output JSON with these exact keys:
+- layoutType: enum from DesignLayout
+- colorPalette: {primary,secondary,accent,background,text} - use brand colors, set text for contrast
+- typography: {headingFont,bodyFont,headingSize,bodySize} - use brand fonts
+- visualElements: array max 5 of {type,description,url?,placement,size} - use provided visuals or minimal placeholder
+- contentPlacement: {statsPosition,imagePosition,textAlignment,contentMapping[]} - map content sections
+- spacing: {sectionSpacing,elementSpacing} - numbers in points
+- specialInstructions: optional string
 
-      const llmResult = await llmClient.generateStructured(
-        designDirectiveSchema,
-        prompt,
-        {
-          slideId: slideData.id,
-          documentId: slideData.documentId,
-          layoutType,
-        },
-        "generation"
-      );
+CRITICAL: Return ONLY valid JSON matching schema. No extra fields. No commentary.`;
+
+      // What to output (must validate against designDirectiveSchema):
+      // - layoutType: choose the best layout for this slide from the provided layout enum.
+      // - colorPalette: stay within brand colors; ensure readable text contrast (set text color explicitly).
+      // - typography: pick heading/body sizes that reflect hierarchy and legibility; use provided fonts.
+      // - visualElements: select concise set (max 5) of icons/images/charts/graphs that reinforce the message; include URLs only when provided; match placements to layout.
+      // - If you suggest search queries for icons/images, keep each query concise (<=50 characters) using 3-5 keywords.
+      // - contentPlacement: map 3-6 meaningful content sections from the strategic copy to specific positions; include statsPosition, imagePosition, textAlignment, and contentMapping with emphasis where needed.
+      // - spacing: set sectionSpacing and elementSpacing for clean breathing room (use points).
+      // - specialInstructions: only if critical (e.g., keep accent usage sparing, avoid clutter, chart suggestion).
+      let llmResult;
+      try {
+        logger.info(
+          {
+            slideId: slideData.id,
+            slideType: slideData.slideType,
+            layoutType,
+            documentId: slideData.documentId,
+            promptPreview:
+              prompt.slice(0, 200) + (prompt.length > 200 ? "..." : ""),
+          },
+          "Invoking LLM to generate design directives"
+        );
+        llmResult = await llmClient.generateStructured(
+          designDirectiveSchema,
+          prompt,
+          {
+            slideId: slideData.id,
+            documentId: slideData.documentId,
+            layoutType,
+          },
+          "generation"
+        );
+      } catch (primaryError) {
+        // Log why the primary attempt failed before retrying
+        logger.warn(
+          {
+            slideId: slideData.id,
+            slideType: slideData.slideType,
+            layoutType,
+            documentId: slideData.documentId,
+            error: primaryError?.message,
+          },
+          "Primary LLM attempt failed, retrying with minimal prompt"
+        );
+
+        // Retry with a tighter, minimal prompt to enforce schema compliance
+        const minimalVisuals = fallbackVisuals.slice(0, 3).map((v) => ({
+          t: v.type,
+          d: (v.description || "").substring(0, 50),
+          u: v.url || null,
+        }));
+
+        const minimalPrompt = `You are the Art Director for Levitate Studios. Produce production-ready, strictly schema-compliant design directives that let a designer execute the slide without guesswork. Generate design directives JSON matching designDirectiveSchema exactly.
+
+Title: ${title.substring(0, 100)}
+Type: ${slideData.slideType}
+Layout: ${layoutType}
+
+Brand: colors=${brandGuidelines.colors.primary},${
+          brandGuidelines.colors.secondary
+        },${brandGuidelines.colors.accent}|fonts=${
+          brandGuidelines.typography.headingFont
+        },${brandGuidelines.typography.bodyFont}
+
+Content: ${sanitizedContent.substring(0, 1000)}
+Visuals: ${JSON.stringify(minimalVisuals)}
+
+Required JSON structure:
+{
+  "layoutType": "enum value",
+  "colorPalette": {"primary":"#hex","secondary":"#hex","accent":"#hex","background":"#hex","text":"#hex"},
+  "typography": {"headingFont":"string","bodyFont":"string","headingSize":number,"bodySize":number},
+  "visualElements": [{"type":"ICON|IMAGE","description":"string","placement":"LEFT|RIGHT|TOP|BOTTOM|CENTER","size":"SMALL|MEDIUM|LARGE","url":"optional"}],
+  "contentPlacement": {"statsPosition":"LEFT|RIGHT|TOP|BOTTOM","imagePosition":"LEFT|RIGHT|TOP|BOTTOM|BACKGROUND","textAlignment":"LEFT|CENTER|RIGHT|JUSTIFY","contentMapping":[]},
+  "spacing": {"sectionSpacing":number,"elementSpacing":number},
+  "specialInstructions": "optional string"
+}
+
+Return ONLY valid JSON. No extra fields.`;
+
+        llmResult = await llmClient.generateStructured(
+          designDirectiveSchema,
+          minimalPrompt,
+          {
+            slideId: slideData.id,
+            documentId: slideData.documentId,
+            layoutType,
+            retry: true,
+          },
+          "generation"
+        );
+      }
 
       const rawDirectives = llmResult.data || {};
 
@@ -345,6 +435,16 @@ Rules:
 
       throw error;
     }
+  }
+
+  /**
+   * Safely truncate text for prompts
+   * @private
+   */
+  static truncateContent(text, maxLen = 4000) {
+    if (!text) return "";
+    const str = String(text).replace(/\s+/g, " ").trim();
+    return str.length > maxLen ? `${str.slice(0, maxLen - 3)}...` : str;
   }
 }
 
