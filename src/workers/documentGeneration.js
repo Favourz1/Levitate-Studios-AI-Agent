@@ -816,19 +816,45 @@ async function updateExistingDocumentRecords(
       );
     }
 
-    // Convert brand origin document to formatted blocks
+    // Convert brand origin document to formatted blocks (includes logo and header)
     const formattedBlocks = convertBrandOriginToFormattedBlocks(
       brandOriginDocument.document,
       documentRecord.project
     );
 
-    // Try to update with formatted content first, then fallback to plain text
+    // Update document using processDocumentBlocks directly to handle all block types (images, tables, etc.)
+    // This ensures logo and header are included in regeneration
     let documentUpdateSuccessful = false;
     let lastUpdateError = null;
 
     try {
-      // First try updating with formatted blocks (preferred method)
-      await googleIntegration.updateDocumentContent(
+      // Get current document to find end index
+      const doc = await googleIntegration.docs.documents.get({
+        documentId: documentRecord.document.driveFileId,
+      });
+
+      const endIndex =
+        doc.data.body.content[doc.data.body.content.length - 1].endIndex - 1;
+
+      // Clear existing content first (delete from index 1 to endIndex)
+      await googleIntegration.docs.documents.batchUpdate({
+        documentId: documentRecord.document.driveFileId,
+        requestBody: {
+          requests: [
+            {
+              deleteContentRange: {
+                range: {
+                  startIndex: 1,
+                  endIndex,
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      // Now use processDocumentBlocks to add formatted content (handles images, tables, etc.)
+      await googleIntegration.processDocumentBlocks(
         documentRecord.document.driveFileId,
         formattedBlocks
       );
@@ -838,9 +864,10 @@ async function updateExistingDocumentRecords(
         {
           documentId,
           googleDocId: documentRecord.document.driveFileId,
+          blocksCount: formattedBlocks.length,
           correlationId,
         },
-        "Google Drive document updated successfully with formatted content for regeneration"
+        "Google Drive document updated successfully with formatted blocks (including logo and header) for regeneration"
       );
     } catch (formattedUpdateError) {
       logger.warn(
