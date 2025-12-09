@@ -871,7 +871,9 @@ async function sendCompletionEmail(
       "Requerying project to get all documents including workplan"
     );
 
-    // Always requery project to get all latest documents including workplan
+    // Always requery project to get all latest documents including workplan and updated phase
+    // The phase was updated to FINALIZED in a transaction before this function is called
+    // This fresh query ensures we get the updated phase value and documents
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {

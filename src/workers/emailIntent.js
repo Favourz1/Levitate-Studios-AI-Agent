@@ -1383,15 +1383,18 @@ async function transitionProjectPhaseIfNeeded(
       });
     });
   } catch (error) {
-    logger.warn(
+    logger.error(
       {
         projectId,
         targetPhase,
         correlationId,
         error: error.message,
+        stack: error.stack,
       },
       "Failed to update project phase during acceptance workflow"
     );
+    // Re-throw error to ensure phase transition failures are visible
+    throw error;
   }
 }
 

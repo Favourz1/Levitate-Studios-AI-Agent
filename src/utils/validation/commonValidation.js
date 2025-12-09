@@ -1,4 +1,5 @@
 // Common validation utilities that don't require logging
+const { ProjectPhase } = require("@/constants");
 
 /**
  * General email validation helper
