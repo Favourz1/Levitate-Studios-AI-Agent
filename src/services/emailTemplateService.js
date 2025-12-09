@@ -2470,6 +2470,293 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate admin notification template for email intent processing results
+   * @param {Object} project - Project information
+   * @param {Object} email - Email record
+   * @param {Object} intentResult - Intent detection result with full metadata
+   * @param {Object} actionResult - Action result from intent handling
+   * @param {Array} peopleNotified - Array of people notified (emails/names)
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateIntentProcessingResultsTemplate(
+    project,
+    email,
+    intentResult,
+    actionResult,
+    peopleNotified = []
+  ) {
+    try {
+      const subject = `Email Intent Processed: ${project.name} - ${intentResult.intent}`;
+
+      const escapeHtml = (text) => {
+        if (!text) return "";
+        return String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      };
+
+      const formatJSON = (obj) => {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
+        }
+      };
+
+      const intentBadgeColor = {
+        DOC_FEEDBACK: "#ffc107",
+        ACCEPT: "#28a745",
+        REJECT: "#dc3545",
+        OFFTOPIC: "#6c757d",
+        OTHER: "#6c757d",
+      };
+
+      const intentColor = intentBadgeColor[intentResult.intent] || "#6c757d";
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${escapeHtml(subject)}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 700px;
+              margin: 0 auto;
+              padding: 20px;
+              background-color: #f4f4f4;
+            }
+            .container {
+              background-color: #ffffff;
+              border-radius: 8px;
+              padding: 30px;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid ${intentColor};
+            }
+            .header h1 {
+              color: ${intentColor};
+              margin: 0;
+              font-size: 24px;
+            }
+            .intent-badge {
+              display: inline-block;
+              background-color: ${intentColor};
+              color: white;
+              padding: 5px 15px;
+              border-radius: 20px;
+              font-size: 14px;
+              font-weight: bold;
+              margin: 10px 0;
+            }
+            .info-box {
+              background-color: #f8f9fa;
+              border-left: 4px solid ${intentColor};
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .info-box h3 {
+              margin-top: 0;
+              color: ${intentColor};
+            }
+            .info-box ul {
+              list-style: none;
+              padding: 0;
+              margin: 10px 0;
+            }
+            .info-box li {
+              padding: 5px 0;
+            }
+            .metadata-box {
+              background-color: #f8f9fa;
+              border: 1px solid #dee2e6;
+              border-radius: 4px;
+              padding: 15px;
+              margin: 20px 0;
+              font-family: 'Courier New', monospace;
+              font-size: 12px;
+              white-space: pre-wrap;
+              overflow-x: auto;
+              max-height: 400px;
+              overflow-y: auto;
+            }
+            .footer {
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #dee2e6;
+              text-align: center;
+              color: #6c757d;
+              font-size: 12px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📧 Email Intent Processing Results</h1>
+              <p>Intent detected and processed for client email</p>
+            </div>
+            
+            <div class="content">
+              <div class="info-box">
+                <h3>📋 Email Details</h3>
+                <ul>
+                  <li><strong>From:</strong> ${escapeHtml(
+                    email.fromAddr || "Unknown"
+                  )}</li>
+                  <li><strong>Subject:</strong> ${escapeHtml(
+                    email.subject || "(no subject)"
+                  )}</li>
+                  <li><strong>Received:</strong> ${new Date(
+                    email.receivedAt
+                  ).toLocaleDateString("en-NG", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}</li>
+                  <li><strong>Client:</strong> ${escapeHtml(
+                    project.client?.name || "Unknown Client"
+                  )}</li>
+                  <li><strong>Project:</strong> ${escapeHtml(project.name)}</li>
+                </ul>
+              </div>
+
+              <div class="info-box">
+                <h3>🎯 Detected Intent</h3>
+                <p><span class="intent-badge">${escapeHtml(
+                  intentResult.intent
+                )}</span></p>
+                <p><strong>Confidence:</strong> ${(
+                  (intentResult.confidence || 0) * 100
+                ).toFixed(1)}%</p>
+                <p><strong>Requires Action:</strong> ${
+                  intentResult.requiresAction ? "Yes" : "No"
+                }</p>
+                ${
+                  intentResult.summary
+                    ? `<p><strong>Summary:</strong> ${escapeHtml(
+                        intentResult.summary
+                      )}</p>`
+                    : ""
+                }
+              </div>
+
+              ${
+                actionResult
+                  ? `<div class="info-box">
+                <h3>✅ Actions Taken</h3>
+                <ul>
+                  <li><strong>Action Taken:</strong> ${
+                    actionResult.actionTaken ? "Yes" : "No"
+                  }</li>
+                  <li><strong>Result:</strong> ${escapeHtml(
+                    actionResult.message || "No message"
+                  )}</li>
+                  ${
+                    actionResult.documentId
+                      ? `<li><strong>Document ID:</strong> ${actionResult.documentId}</li>`
+                      : ""
+                  }
+                  ${
+                    actionResult.invoiceId
+                      ? `<li><strong>Invoice ID:</strong> ${actionResult.invoiceId}</li>`
+                      : ""
+                  }
+                  ${
+                    actionResult.asanaTaskGid
+                      ? `<li><strong>Asana Task:</strong> ${actionResult.asanaTaskGid}</li>`
+                      : ""
+                  }
+                </ul>
+              </div>`
+                  : ""
+              }
+
+              ${
+                peopleNotified && peopleNotified.length > 0
+                  ? `<div class="info-box">
+                <h3>👥 People Notified</h3>
+                <ul>
+                  ${peopleNotified
+                    .map(
+                      (person) =>
+                        `<li>${escapeHtml(
+                          person.name || person.email || person
+                        )}</li>`
+                    )
+                    .join("")}
+                </ul>
+              </div>`
+                  : ""
+              }
+
+              <div class="info-box">
+                <h3>📊 Full Intent Metadata</h3>
+                <div class="metadata-box">${escapeHtml(
+                  formatJSON(intentResult)
+                )}</div>
+              </div>
+
+              ${
+                actionResult && actionResult.details
+                  ? `<div class="info-box">
+                <h3>📋 Action Details</h3>
+                <div class="metadata-box">${escapeHtml(
+                  formatJSON(actionResult.details)
+                )}</div>
+              </div>`
+                  : ""
+              }
+            </div>
+            
+            <div class="footer">
+              <p><small>This is an automated notification from Levitate Studios AI Agent.</small></p>
+              <p><small>Email ID: ${email.id} | Project ID: ${
+        project.id
+      }</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated intent processing results template",
+        projectId: project.id,
+        emailId: email.id,
+        intent: intentResult.intent,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate intent processing results template",
+        error: error.message,
+        projectId: project?.id,
+        emailId: email?.id,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Sanitize template content to prevent XSS
    * @param {string} content - Content to sanitize
    * @returns {string} Sanitized content

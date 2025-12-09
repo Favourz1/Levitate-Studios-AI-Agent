@@ -761,8 +761,27 @@ async function handleDetectedIntent(context, intentResult, correlationId) {
 
       case EmailIntent.OFFTOPIC:
       case EmailIntent.OTHER:
-        // TODO: Send to admin and PM for confirmation if ai agent got it right and they can manually select right intent via email/ui
-        return;
+        logger.info(
+          {
+            emailId: email.id,
+            intent,
+            correlationId,
+          },
+          "OFFTOPIC/OTHER intent detected - no automatic action"
+        );
+        return {
+          actionTaken: false,
+          intent,
+          message:
+            "Intent detected but no automatic action defined for this type",
+          details: {
+            requiresManualReview: true,
+            intentType: intent,
+            confidence: intentResult.confidence,
+            summary: intentResult.summary,
+          },
+          peopleNotified: [],
+        };
 
       default:
         logger.info(
@@ -887,6 +906,14 @@ async function handleDocFeedbackIntent(context, intentResult, correlationId) {
       documentId: currentDocument.id,
       documentStatus: DocumentStatus.CLIENT_FEEDBACK,
       regenerationTriggered: true,
+      peopleNotified: [],
+      details: {
+        documentType: currentDocument.type,
+        requestedChangesCount: intentResult.requestedChanges?.length || 0,
+        clientSentiment: intentResult.clientSentiment,
+        urgency: intentResult.urgency,
+        regenerationQueued: true,
+      },
     };
   } catch (error) {
     logger.error(
@@ -993,11 +1020,16 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
         documentId: currentDocument.id,
         documentType: currentDocument.type,
         documentStatus: DocumentStatus.ACCEPTED,
+        peopleNotified: [],
+        details: {
+          nextAction: "quote_generation_queued",
+          projectPhaseTransition: ProjectPhase.QUOTE_DOCUMENT,
+        },
       };
     }
 
     if (currentDocument.type === DocumentType.QUOTE) {
-      await handleQuoteAcceptance(
+      const quoteAcceptanceResult = await handleQuoteAcceptance(
         project,
         currentDocument,
         email,
@@ -1012,6 +1044,14 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
         documentId: currentDocument.id,
         documentType: currentDocument.type,
         documentStatus: DocumentStatus.ACCEPTED,
+        invoiceId: quoteAcceptanceResult.invoiceId,
+        peopleNotified: quoteAcceptanceResult.peopleNotified || [],
+        details: {
+          selectedQuoteId: quoteAcceptanceResult.selectedQuoteId,
+          invoiceId: quoteAcceptanceResult.invoiceId,
+          projectFinalized: true,
+          asanaProjectInitQueued: true,
+        },
       };
     }
 
@@ -1022,6 +1062,11 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
       documentId: currentDocument.id,
       documentType: currentDocument.type,
       documentStatus: DocumentStatus.ACCEPTED,
+      peopleNotified: [],
+      details: {
+        documentType: currentDocument.type,
+        status: DocumentStatus.ACCEPTED,
+      },
     };
   } catch (error) {
     logger.error(
@@ -1121,6 +1166,8 @@ async function handleQuoteAcceptance(
     }
 
     const selectedQuoteId = fullDocument.selectedQuoteId;
+    let invoiceId = null;
+    const peopleNotified = [];
 
     // Step 1: Verify quote is not cancelled before submitting
     logger.info(
@@ -1170,7 +1217,7 @@ async function handleQuoteAcceptance(
       "Creating invoice from quote"
     );
 
-    const invoiceId = await QuoteService.createInvoiceFromQuote(
+    invoiceId = await QuoteService.createInvoiceFromQuote(
       selectedQuoteId,
       fullDocument.project
     );
@@ -1239,12 +1286,15 @@ async function handleQuoteAcceptance(
     // Check if email exists and has an id (from email intent detection)
     const isEmailIntent = email && typeof email === "object" && email.id;
     if (isEmailIntent) {
-      await sendQuoteAcceptanceConfirmationEmail(
+      const notifiedPeople = await sendQuoteAcceptanceConfirmationEmail(
         fullDocument.project,
         fullDocument,
         invoiceId,
         correlationId
       );
+      if (notifiedPeople && Array.isArray(notifiedPeople)) {
+        peopleNotified.push(...notifiedPeople);
+      }
     } else {
       logger.info(
         {
@@ -1269,6 +1319,13 @@ async function handleQuoteAcceptance(
       },
       "Quote acceptance workflow completed successfully"
     );
+
+    // Return result with invoiceId and peopleNotified for admin notification
+    return {
+      invoiceId,
+      selectedQuoteId,
+      peopleNotified,
+    };
   } catch (error) {
     logger.error(
       {
@@ -1392,7 +1449,7 @@ async function handleRejectIntent(context, intentResult, correlationId) {
     });
 
     // Send notification emails to PM and Admin with action buttons
-    await sendRejectionNotificationEmails(
+    const peopleNotified = await sendRejectionNotificationEmails(
       context,
       intentResult,
       correlationId,
@@ -1417,6 +1474,14 @@ async function handleRejectIntent(context, intentResult, correlationId) {
       documentId: currentDocument?.id,
       documentStatus: currentDocument ? currentDocument.status : null, // Return current status, not REJECTED
       isDocumentLevel,
+      peopleNotified: peopleNotified || [],
+      details: {
+        isDocumentLevel,
+        confidence: intentResult.confidence,
+        clientSentiment: intentResult.clientSentiment,
+        urgency: intentResult.urgency,
+        requestedChangesCount: intentResult.requestedChanges?.length || 0,
+      },
     };
   } catch (error) {
     logger.error(
@@ -1452,6 +1517,7 @@ async function sendRejectionNotificationEmails(
     const pmUser = await AsanaPendingProjectsService.getPMUser(project.id);
 
     const recipients = [];
+    const peopleNotified = [];
     if (pmUser && pmUser.email) {
       recipients.push({
         email: pmUser.email,
@@ -1543,6 +1609,12 @@ async function sendRejectionNotificationEmails(
           htmlContent: emailTemplate.htmlContent,
         });
 
+        peopleNotified.push({
+          email: recipient.email,
+          name: recipient.name,
+          role: recipient.role,
+        });
+
         logger.info(
           {
             recipient: recipient.email,
@@ -1583,6 +1655,8 @@ async function sendRejectionNotificationEmails(
         at: new Date(),
       },
     });
+
+    return peopleNotified;
   } catch (error) {
     logger.error(
       {
@@ -1594,6 +1668,83 @@ async function sendRejectionNotificationEmails(
     );
     // Don't throw - this shouldn't fail the main intent handling
     // The document status has already been updated and audit log created
+    return [];
+  }
+}
+
+/**
+ * Send admin notification with intent processing results
+ * @param {Object} context - Email context
+ * @param {Object} intentResult - Intent detection result
+ * @param {Object} actionResult - Action result from intent handling
+ * @param {string} correlationId - Correlation ID
+ * @returns {Promise<void>}
+ */
+async function sendAdminIntentProcessingNotification(
+  context,
+  intentResult,
+  actionResult,
+  correlationId
+) {
+  try {
+    const adminEmail = appConfig.server.adminEmail;
+
+    if (!adminEmail) {
+      logger.warn(
+        {
+          emailId: context.email.id,
+          projectId: context.project.id,
+          correlationId,
+        },
+        "No admin email configured - skipping intent processing notification"
+      );
+      return;
+    }
+
+    // Collect people notified from action result
+    const peopleNotified = [];
+    if (actionResult?.peopleNotified) {
+      peopleNotified.push(...actionResult.peopleNotified);
+    }
+
+    // Generate email template
+    const emailTemplate =
+      EmailTemplateService.generateIntentProcessingResultsTemplate(
+        context.project,
+        context.email,
+        intentResult,
+        actionResult,
+        peopleNotified
+      );
+
+    // Send email to admin
+    await brevoIntegration.sendTransactionalEmail({
+      to: [adminEmail],
+      subject: emailTemplate.subject,
+      htmlContent: emailTemplate.htmlContent,
+    });
+
+    logger.info(
+      {
+        emailId: context.email.id,
+        projectId: context.project.id,
+        intent: intentResult.intent,
+        adminEmail,
+        correlationId,
+      },
+      "Admin intent processing notification sent successfully"
+    );
+  } catch (error) {
+    logger.error(
+      {
+        emailId: context.email.id,
+        projectId: context.project.id,
+        error: error.message,
+        correlationId,
+      },
+      "Failed to send admin intent processing notification"
+    );
+    // Don't throw - this is not critical for the main flow
   }
 }
 
@@ -1626,6 +1777,14 @@ const emailIntentProcessor = async (job) => {
     const actionResult = await handleDetectedIntent(
       context,
       intentResult,
+      correlationId
+    );
+
+    // Step 4: Send admin notification with full intent processing results
+    await sendAdminIntentProcessingNotification(
+      context,
+      intentResult,
+      actionResult,
       correlationId
     );
 
@@ -2172,6 +2331,7 @@ async function sendQuoteAcceptanceConfirmationEmail(
 
     // Get Admin and Finance Manager users
     const recipients = [];
+    const peopleNotified = [];
 
     // Get Finance Manager - query all active team members and filter by role
     const allActiveTeamMembers = await prisma.teamMember.findMany({

@@ -633,31 +633,62 @@ class EmailInboundService {
       }
 
       // Step 6: Get conversation history for context (last 5 emails excluding current)
+      // Filter to only show emails to/from client (use client email to filter)
       let conversationHistory = [];
       try {
-        const emailThread = await prisma.emailThread.findUnique({
-          where: { id: emailRecord.threadId },
-          include: {
-            emails: {
-              where: {
-                id: { not: emailRecord.id }, // Exclude current email
-              },
-              orderBy: { receivedAt: "desc" },
-              take: 5, // Last 5 emails for context
-              select: {
-                id: true,
-                direction: true,
-                fromAddr: true,
-                subject: true,
-                textBody: true,
-                receivedAt: true,
-                intent: true,
+        const clientEmail = project.client?.primaryEmail?.toLowerCase();
+
+        if (!clientEmail) {
+          logger.warn(
+            {
+              emailId: emailRecord.id,
+              projectId: project.id,
+              correlationId,
+            },
+            "No client email found - skipping conversation history"
+          );
+        } else {
+          const emailThread = await prisma.emailThread.findUnique({
+            where: { id: emailRecord.threadId },
+            include: {
+              emails: {
+                where: {
+                  id: { not: emailRecord.id }, // Exclude current email
+                  // Filter to only emails to/from client (case-insensitive contains match)
+                  // Using contains to handle comma-separated addresses and display names
+                  OR: [
+                    {
+                      fromAddr: {
+                        contains: clientEmail,
+                        mode: "insensitive",
+                      },
+                    },
+                    {
+                      toAddr: {
+                        contains: clientEmail,
+                        mode: "insensitive",
+                      },
+                    },
+                  ],
+                },
+                orderBy: { receivedAt: "desc" },
+                take: 5, // Last 5 emails for context
+                select: {
+                  id: true,
+                  direction: true,
+                  fromAddr: true,
+                  toAddr: true,
+                  subject: true,
+                  textBody: true,
+                  receivedAt: true,
+                  intent: true,
+                },
               },
             },
-          },
-        });
+          });
 
-        conversationHistory = emailThread?.emails || [];
+          conversationHistory = emailThread?.emails || [];
+        }
 
         logger.info(
           {
