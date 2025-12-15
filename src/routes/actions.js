@@ -21,7 +21,6 @@ const { getPrismaClient } = require("@/database");
 
 const router = Router();
 const logger = createLogger("routes:actions");
-// TODO: Either update urls or add more info in jwt to know if its for brand origin or quote etc.
 
 /**
  * GET /actions/send-to-client?t=<JWT>&quoteId=<QUOTE_ID>

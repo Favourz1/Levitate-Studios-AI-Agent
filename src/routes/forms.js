@@ -17,7 +17,7 @@ const logger = createLogger("routes:api");
  * This demonstrates that the refactored services work for both webhook and API scenarios
  */
 router.post(
-  "/submit",
+  "/questionnaire/submit",
   asyncHandler(async (req, res) => {
     const startTime = Date.now();
     const correlationId =
