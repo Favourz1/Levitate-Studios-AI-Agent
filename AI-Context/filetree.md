@@ -197,7 +197,7 @@ src/database/
 src/integrations/
 ├── index.js                          # Exports all integrations
 ├── asana.js                          # Asana API client (projects, tasks, boards)
-├── brevo.js                          # Brevo email API client (send, inbound webhooks)
+├── brevo.js                          # Brevo email API client for sending email (send, inbound webhooks)
 ├── google.js                         # Google Workspace APIs (Docs, Drive, Forms)
 ├── levitateStudiosErp.js             # Levitate ERP API client (quotes, invoices)
 └── tavily.js                         # Tavily research API client (web research)
@@ -379,7 +379,6 @@ src/services/
 ├── projectService.js                 # Project lifecycle management
 │
 ├── Document Services
-├── documentService.js                # Document CRUD and status management
 ├── documentSendingService.js         # Document sending to clients
 ├── brandOriginContextService.js      # Brand origin context building
 ├── brandOriginPromptService.js       # Brand origin prompt generation
@@ -395,10 +394,8 @@ src/services/
 ├── workplanDocumentBuilderService.js # Google Docs document building
 │
 ├── Integration Services
-├── asanaService.js                   # Asana project/task operations
 ├── asanaPendingProjectsService.js    # Pending projects board management
 ├── asanaProjectService.js            # Production project board management
-├── emailService.js                   # Email sending via Brevo
 ├── emailInboundService.js            # Inbound email processing
 ├── emailTemplateService.js          # Email template management
 │
@@ -421,9 +418,9 @@ src/services/
 **Service Responsibilities**:
 
 - **Core Services**: Manage entities (Client, Project) and their lifecycle
-- **Document Services**: Handle document generation, versioning, and sending
+- **Document Services**: Handle document sending (email sending done via `brevoIntegration` directly)
 - **Workplan Services**: Multi-stage AI pipeline (plan → research → strategy → design → build)
-- **Integration Services**: Wrap external API calls with business logic
+- **Integration Services**: Wrap external API calls with business logic (email sending via `@/integrations/brevo.js`)
 - **AI Services**: Generate prompts and orchestrate LLM calls
 
 ---
@@ -470,12 +467,14 @@ src/workers/
 ├── index.js                          # Worker orchestrator (starts all workers)
 ├── documentGeneration.js             # Processes document generation jobs
 ├── emailIntent.js                    # Processes email intent detection
-├── asanaSync.js                      # Processes Asana sync jobs
 ├── asanaProjectInit.js               # Processes Asana project initialization
 ├── quoteGeneration.js                # Processes quote generation jobs
-├── notifications.js                  # Processes notification jobs
-├── snapshotSync.js                   # Processes Google Docs snapshot sync
 └── workplanGeneration.js            # Processes workplan generation jobs
+
+Note: The following workers are placeholders and not yet implemented:
+- asanaSync.js                      # Placeholder - Asana sync jobs
+- notifications.js                  # Placeholder - Notification jobs
+- snapshotSync.js                   # Placeholder - Google Docs snapshot sync
 ```
 
 **Pattern**:
@@ -761,15 +760,15 @@ Routes → Services → Integrations/LLM/Database
 ```
 Google Forms → Webhook → forms.js route
   → formSubmissionService
-    → Creates Client & Project
-    → Adds to Asana Pending Board
+    → Creates Client & Project (Prisma)
+    → Adds to Asana Pending Board (asanaPendingProjectsService)
     → Queues Brand Origin Generation
       → Worker processes job
         → brandOriginPromptService generates prompt
         → LLM generates content
         → google.js creates Google Doc
-        → documentService saves metadata
-        → emailService sends to PM for review
+        → Database saves document metadata (Prisma)
+        → brevoIntegration sends email to PM for review
 ```
 
 ### 2. **Document Generation Flow**
@@ -782,8 +781,8 @@ Route/Webhook → QueueService.addDocumentGenerationJob()
         → Appropriate prompt service (brandOrigin/quote/workplan)
         → LLM client generates content
         → google.js creates/updates Google Doc
-        → documentService saves revision
-        → emailService sends notification
+        → Database saves revision (Prisma)
+        → brevoIntegration sends notification email
 ```
 
 ### 3. **Email Intent Detection Flow**
@@ -796,7 +795,7 @@ Brevo Inbound Webhook → webhooks.js route
         → emailIntent worker
           → intentPromptService generates prompt
           → LLM detects intent
-          → emailService updates email record
+          → Database updates email record (Prisma)
           → Triggers appropriate action (regeneration, acceptance, etc.)
 ```
 
@@ -811,8 +810,8 @@ Route → QueueService.addWorkplanGenerationJob()
       → workplanStrategistService (Stage 3: Generate content)
       → workplanArtDirectorService (Stage 4: Generate design directives)
       → workplanDocumentBuilderService (Stage 5: Build Google Doc)
-      → documentService saves
-      → emailService sends notification
+      → Database saves document (Prisma)
+      → brevoIntegration sends notification email
 ```
 
 ### 5. **Asana Project Initialization Flow**
@@ -822,12 +821,12 @@ Project Phase Change → projectService
   → QueueService.addAsanaProjectInitJob()
     → Queue
       → asanaProjectInit worker
-        → asanaService creates project board
-        → asanaService creates sections
+        → asanaIntegration creates project board
+        → asanaIntegration creates sections
         → teamMemberSelectionService selects team
-        → asanaService creates tasks with assignments
-        → asanaService generates task guidance (LLM)
-        → asanaLink saved to database
+        → asanaIntegration creates tasks with assignments
+        → LLM generates task guidance
+        → Database saves asanaLink (Prisma)
 ```
 
 ### 6. **Quote Generation Flow**
@@ -842,8 +841,8 @@ Project Phase Change → quoteService
         → levitateStudiosErp.js creates quote in ERP
         → levitateStudiosErp.js creates 3 variants
         → google.js creates Google Docs for each
-        → documentService saves all documents
-        → emailService sends to Finance Manager
+        → Database saves all documents (Prisma)
+        → brevoIntegration sends email to Finance Manager
 ```
 
 ---
