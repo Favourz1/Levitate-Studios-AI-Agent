@@ -6,6 +6,7 @@ const { healthRouter } = require("@/routes/health");
 const { testsRouter } = require("@/routes/tests");
 const { formsRouter } = require("@/routes/forms");
 const { workplanRouter } = require("@/routes/workplan");
+const uiRouter = require("@/routes/ui");
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use("/", healthRouter);
 router.use("/tests", testsRouter);
 router.use("/forms", formsRouter);
 router.use("/workplan", workplanRouter);
+router.use("/ui", uiRouter); // Mount UI routes at /api/v1/ui
 
 module.exports = { apiRouter: router };

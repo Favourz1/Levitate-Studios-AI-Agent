@@ -200,6 +200,80 @@ const createActionToken = (payload, expiresIn = "1h") => {
   return jwt.sign(payload, appConfig.server.jwtSecret, { expiresIn });
 };
 
+/**
+ * Middleware for UI API routes - extracts acting role from header
+ * Adds to existing exports, does not replace default export
+ * Returns JSON responses in standardized format for UI APIs
+ */
+const requireAuthForUI = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        statusCode: 401,
+        message: "Authorization token required",
+        data: null,
+      });
+    }
+
+    const token = authHeader.substring(7);
+    const decoded = jwt.verify(token, appConfig.server.jwtSecret);
+
+    // Get PrismaClient instance using existing pattern
+    const { getPrismaClient } = require("@/database");
+    const prisma = getPrismaClient();
+
+    // Get user from database - roles is JSON field, not relation
+    const user = await prisma.teamMember.findUnique({
+      where: { id: decoded.userId },
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        success: false,
+        statusCode: 401,
+        message: "User not found or inactive",
+        data: null,
+      });
+    }
+
+    // Parse roles from JSON field
+    const userRoles = Array.isArray(user.roles)
+      ? user.roles.map((r) => (typeof r === "object" ? r.role : r))
+      : [];
+
+    // Extract acting role from header
+    const actingRole = req.headers["x-acting-role"];
+
+    // Validate acting role is in user's roles
+    if (actingRole && !userRoles.includes(actingRole)) {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: "Invalid acting role",
+        data: null,
+      });
+    }
+
+    req.user = user;
+    req.actingRole = actingRole || userRoles[0] || null;
+
+    next();
+  } catch (error) {
+    if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        statusCode: 401,
+        message: "Invalid or expired token",
+        data: null,
+      });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   authenticateToken,
   optionalAuth,
@@ -212,4 +286,5 @@ module.exports = {
   verifyHmacSignature,
   createJwtToken,
   createActionToken,
+  requireAuthForUI,
 };
