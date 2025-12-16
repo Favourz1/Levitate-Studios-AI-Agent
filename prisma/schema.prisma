@@ -174,6 +174,7 @@ model Email {
   intentMetadata    Json?    @map("intent_metadata") @db.JsonB // Complete intent analysis results
   llmTraceId        String?  @map("llm_trace_id")
   processed         Boolean  @default(false)
+  isManuallyLogged  Boolean  @default(false) @map("is_manually_logged")
 
   // Relations
   thread            EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
@@ -224,6 +225,7 @@ model TeamMember {
   asanaUserGid String   @map("asana_user_gid")
   roles        Json     @map("roles") @db.JsonB // [{role: string, isLead: boolean}]
   isActive     Boolean  @default(true) @map("is_active")
+  password     String?  @map("password")
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("team_members")
@@ -283,12 +285,13 @@ model QuestionnaireResponse {
 }
 
 model AuditLog {
-  id        Int      @id @default(autoincrement())
-  projectId Int?     @map("project_id")
-  actor     String   // WHO performed the action
-  action    String   // WHAT action was performed
-  details   Json     @map("details") @db.JsonB // Additional context
-  at        DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  projectId  Int?     @map("project_id")
+  actor      String   // WHO performed the action
+  actingRole String?  @map("acting_role") // Role used when performing action
+  action     String   // WHAT action was performed
+  details    Json     @map("details") @db.JsonB // Additional context
+  at         DateTime @default(now())
 
   // Relations
   project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -305,4 +308,14 @@ model GlobalConfig {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("global_configs")
+}
+
+model RolePermissionOverride {
+  id        Int      @id @default(autoincrement())
+  role      String  @unique
+  overrides Json     @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("role_permission_override")
 }
