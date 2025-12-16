@@ -33,6 +33,7 @@ const errorHandler = (error, req, res, next) => {
       success: false,
       error: "Validation failed",
       message: error.message,
+      statusCode: 400,
     });
     return;
   }
@@ -42,6 +43,7 @@ const errorHandler = (error, req, res, next) => {
       success: false,
       error: "Invalid ID format",
       message: "The provided ID is not valid",
+      statusCode: 400,
     });
     return;
   }
@@ -51,6 +53,7 @@ const errorHandler = (error, req, res, next) => {
       success: false,
       error: "Invalid token",
       message: "The provided token is not valid",
+      statusCode: 401,
     });
     return;
   }
@@ -60,6 +63,7 @@ const errorHandler = (error, req, res, next) => {
       success: false,
       error: "Token expired",
       message: "The provided token has expired",
+      statusCode: 401,
     });
     return;
   }
@@ -74,6 +78,7 @@ const errorHandler = (error, req, res, next) => {
           success: false,
           error: "Conflict",
           message: "A record with this information already exists",
+          statusCode: 409,
         });
         return;
       case "P2025":
@@ -81,6 +86,7 @@ const errorHandler = (error, req, res, next) => {
           success: false,
           error: "Not found",
           message: "The requested record was not found",
+          statusCode: 404,
         });
         return;
       case "P2003":
@@ -88,6 +94,7 @@ const errorHandler = (error, req, res, next) => {
           success: false,
           error: "Foreign key constraint failed",
           message: "Referenced record does not exist",
+          statusCode: 400,
         });
         return;
       default:
@@ -105,6 +112,7 @@ const errorHandler = (error, req, res, next) => {
         appConfig.server.nodeEnv === "development"
           ? error.message
           : "Invalid data provided",
+      statusCode: 400,
     });
     return;
   }
@@ -120,6 +128,7 @@ const errorHandler = (error, req, res, next) => {
     success: false,
     error: "Internal server error",
     message,
+    statusCode,
     ...(appConfig.server.nodeEnv === "development" && { stack: error.stack }),
   });
 };
@@ -137,6 +146,7 @@ const notFoundHandler = (req, res) => {
     success: false,
     error: "Not found",
     message: `Route ${req.method} ${req.url} not found`,
+    statusCode: 404,
   });
 };
 
@@ -179,11 +189,18 @@ const sendErrorResponse = (res, error, statusCode = 500) => {
     const errorResponse = createErrorResponse(error);
     res.status(errorResponse.statusCode).json(errorResponse);
   } else {
+    // Handle string messages
+    const message =
+      typeof error === "string" ? error : error?.message || "An error occurred";
+
     res.status(statusCode).json({
       success: false,
       error: "Internal server error",
+      statusCode,
       message:
-        appConfig.server.nodeEnv === "development"
+        typeof error === "string"
+          ? message
+          : appConfig.server.nodeEnv === "development"
           ? error.message
           : "An error occurred",
       context: error?.context || error,
@@ -195,8 +212,9 @@ const sendErrorResponse = (res, error, statusCode = 500) => {
 const sendSuccessResponse = (res, data, message, statusCode = 200) => {
   res.status(statusCode).json({
     success: true,
-    data,
+    statusCode,
     message,
+    data,
   });
 };
 

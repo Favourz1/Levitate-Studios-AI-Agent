@@ -140,7 +140,8 @@ const createErrorResponse = (error) => {
     return {
       success: false,
       error: error.message,
-      statusCode: error.statusCode,
+      message: error.message,
+      statusCode: error.statusCode || 500,
       context: error.context,
     };
   }
@@ -148,6 +149,7 @@ const createErrorResponse = (error) => {
   return {
     success: false,
     error: "Internal server error",
+    message: "An error occurred",
     statusCode: 500,
   };
 };

@@ -17,7 +17,7 @@ const {
   ipTracker,
   userAgentLogger,
 } = require("@/middleware/logging");
-// const { corsMiddleware } = require("@/middleware/cors");
+const { corsMiddleware } = require("@/middleware/cors");
 // const { rateLimits } = require("@/middleware/rateLimit");
 const { apiRouter } = require("@/routes");
 const {
@@ -50,7 +50,7 @@ app.use(
 app.use(securityHeaders);
 
 // CORS middleware
-// app.use(corsMiddleware);
+app.use(corsMiddleware);
 
 // Special middleware for webhook routes - preserve raw body for ALL apps-script endpoints
 app.use(
