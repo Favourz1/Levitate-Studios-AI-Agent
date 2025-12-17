@@ -1015,4 +1015,706 @@ const processor = async (job) => {
 
 ---
 
+## Codebase Patterns & Conventions
+
+This section documents the established patterns and conventions used throughout the codebase. **All developers must follow these patterns** to maintain consistency and code quality.
+
+### 1. **Configuration Management Pattern**
+
+**Rule**: Never use `process.env` directly. Always use `appConfig` from `@/config`.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { appConfig } = require("@/config");
+const apiKey = appConfig.brevo.apiKey;
+const port = appConfig.server.port;
+
+// ❌ WRONG
+const apiKey = process.env.BREVO_API_KEY;
+const port = process.env.PORT;
+```
+
+**Implementation**:
+
+- All environment variables are validated using Joi schema in `src/config/index.js`
+- Configuration object is frozen to prevent runtime modifications
+- Configuration is organized by domain (database, server, google, brevo, asana, erp, llm, etc.)
+- Access pattern: `appConfig.{domain}.{property}`
+
+**Exceptions** (only in specific cases):
+
+- `src/process-manager.js`: Uses `process.env` for child process environment setup
+- `src/utils/logger.js`: Uses `process.env.NODE_ENV` in base logger config (once)
+- `src/middleware/logging.js`: Uses `process.env.NODE_ENV` for development-only behavior
+
+---
+
+### 2. **Constants & Enums Pattern**
+
+**Rule**: All constants, enums, and magic strings must come from `@/constants`.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { DocumentType, DocumentStatus, ProjectPhase, TeamRole } = require("@/constants");
+if (document.type === DocumentType.BRAND_ORIGIN) { ... }
+if (document.status === DocumentStatus.PM_REVIEW) { ... }
+
+// ❌ WRONG
+if (document.type === "BRAND_ORIGIN") { ... }
+if (document.status === "PM_REVIEW") { ... }
+```
+
+**Available Constants** (from `src/constants/index.js`):
+
+- `ProjectPhase`: Project lifecycle phases
+- `DocumentType`: Document types (BRAND_ORIGIN, QUOTE, QUOTE_VARIANT, WORKPLAN)
+- `DocumentStatus`: Document workflow statuses
+- `WorkplanServiceType`: Service types for workplan generation
+- `SlideType`: Workplan slide types
+- `EmailIntent`: Detected email intents
+- `TeamRole`: Team member roles
+- `AuditActions`: System audit log action types
+- `ActionType`: JWT token action types
+- `SystemEmails`: System email addresses
+- `BrandAssets`: Brand asset file IDs and URLs
+- `LEVITATE_BRAND_GUIDELINES`: Design system constants
+- And many more...
+
+**Benefits**:
+
+- Type safety through IDE autocomplete
+- Single source of truth for all constants
+- Prevents typos and inconsistencies
+- Easy refactoring
+
+---
+
+### 3. **Path Alias Pattern**
+
+**Rule**: Always use `@/` prefix for absolute imports. Never use relative imports outside the same directory.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { appConfig } = require("@/config");
+const { getPrismaClient } = require("@/database");
+const { createLogger } = require("@/utils/logger");
+const { ValidationError } = require("@/utils/errors");
+const { brevoIntegration } = require("@/integrations");
+const { ProjectService } = require("@/services/projectService");
+
+// ❌ WRONG (relative imports)
+const { appConfig } = require("../../config");
+const { getPrismaClient } = require("../database");
+```
+
+**Configuration**: Path aliases are configured in `jsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+```
+
+---
+
+### 4. **Logging Pattern**
+
+**Rule**: Every module must create its own logger using `createLogger` with a descriptive module name.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { createLogger } = require("@/utils/logger");
+const logger = createLogger("service:project"); // or "worker:documentGeneration", "route:actions", etc.
+
+logger.info({ projectId, userId }, "Project created successfully");
+logger.error({ error, projectId }, "Failed to create project");
+logger.warn({ documentId }, "Document status is unusual");
+logger.debug({ data }, "Processing document data");
+```
+
+**Logger Naming Convention**:
+
+- Services: `"service:{serviceName}"` (e.g., `"service:project"`, `"service:email-inbound"`)
+- Workers: `"worker:{workerName}"` (e.g., `"worker:documentGeneration"`, `"worker:emailIntent"`)
+- Routes: `"route:{routeName}"` (e.g., `"route:actions"`, `"route:webhooks"`)
+- Middleware: `"middleware:{middlewareName}"` (e.g., `"middleware:auth"`, `"middleware:errorHandler"`)
+- Integrations: `"integration:{integrationName}"` (e.g., `"integration:brevo"`, `"integration:google"`)
+
+**Structured Logging**:
+
+- Always include context objects: `logger.info({ projectId, userId }, "message")`
+- Use appropriate log levels: `error`, `warn`, `info`, `debug`
+- Include correlation IDs when available: `logger.info({ correlationId, ... }, "message")`
+
+**Special Logging Functions**:
+
+- `logError(logger, error, context)`: For error logging with stack traces
+- `logIntegrationCall(logger, integration, action, success, duration, error)`: For integration API calls
+- `logJobStart/logJobComplete/logJobFailed`: For background job tracking
+
+---
+
+### 5. **Error Handling Pattern**
+
+**Rule**: Use custom error classes from `@/utils/errors`. Services throw errors, middleware catches them.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT - In Services
+const { ValidationError, NotFoundError, GoogleError } = require("@/utils/errors");
+
+if (!documentId) {
+  throw new ValidationError("Document ID is required");
+}
+
+const document = await prisma.document.findUnique({ where: { id: documentId } });
+if (!document) {
+  throw new NotFoundError("Document", documentId);
+}
+
+try {
+  await googleIntegration.createDocument(...);
+} catch (error) {
+  throw new GoogleError("createDocument", error, { documentId });
+}
+
+// ✅ CORRECT - In Routes (errors automatically caught by asyncHandler)
+router.post("/documents", asyncHandler(async (req, res) => {
+  const result = await DocumentService.createDocument(req.body);
+  res.json({ success: true, data: result });
+}));
+```
+
+**Available Error Classes**:
+
+- `BaseError`: Base class for all custom errors
+- `ValidationError`: Input validation errors (400)
+- `NotFoundError`: Resource not found (404)
+- `UnauthorizedError`: Authentication errors (401)
+- `ForbiddenError`: Authorization errors (403)
+- `ConflictError`: Resource conflicts (409)
+- `RateLimitError`: Rate limiting (429)
+- `IntegrationError`: Base class for integration errors (502)
+- `BrevoError`: Brevo API errors
+- `GoogleError`: Google API errors
+- `AsanaError`: Asana API errors
+- `TavilyError`: Tavily API errors
+- `LLMError`: LLM provider errors
+- `DocumentError`: Document operation errors
+- `JobProcessingError`: Background job errors
+
+**Error Flow**:
+
+1. Service throws custom error
+2. Route handler wrapped in `asyncHandler` catches it
+3. Error handler middleware (`src/middleware/errorHandler.js`) processes it
+4. Structured error response sent to client
+5. Error logged with context
+
+---
+
+### 6. **Database Access Pattern**
+
+**Rule**: Always use `getPrismaClient()` and `withTransaction()` from `@/database`. Never create PrismaClient directly.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { getPrismaClient, withTransaction } = require("@/database");
+const prisma = getPrismaClient();
+
+// Single query
+const document = await prisma.document.findUnique({ where: { id: documentId } });
+
+// Transaction
+const result = await withTransaction(async (tx) => {
+  const document = await tx.document.create({ data: {...} });
+  await tx.documentRevision.create({ data: {...} });
+  return document;
+});
+
+// ❌ WRONG
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient(); // Don't do this!
+```
+
+**Transaction Pattern**:
+
+- Use `withTransaction` for atomic operations
+- Pass callback function that receives transaction client `tx`
+- All operations within callback use `tx` instead of `prisma`
+- Automatic rollback on error, commit on success
+- Configurable timeout (default: 5000ms)
+
+**Benefits**:
+
+- Singleton Prisma client (connection pooling)
+- Centralized connection management
+- Automatic query logging in development
+- Graceful error handling
+
+---
+
+### 7. **Service Layer Pattern**
+
+**Rule**: Services are stateless classes with static methods. They orchestrate integrations, LLM calls, and database operations.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+class ProjectService {
+  static async createProject(data) {
+    // Validation
+    if (!data.name) {
+      throw new ValidationError("Project name is required");
+    }
+
+    // Database operations
+    const project = await withTransaction(async (tx) => {
+      return await tx.project.create({ data });
+    });
+
+    // Integration calls
+    await asanaIntegration.createProject(...);
+
+    // Logging
+    logger.info({ projectId: project.id }, "Project created");
+
+    return project;
+  }
+}
+
+module.exports = { ProjectService };
+```
+
+**Service Responsibilities**:
+
+- Business logic orchestration
+- Input validation
+- Database operations (via Prisma)
+- Integration calls (via integration modules)
+- LLM calls (via LLM client)
+- Error handling (throw custom errors)
+- Logging (via module logger)
+
+**Service Rules**:
+
+- No direct HTTP concerns (no `req`, `res`)
+- No direct route handlers
+- Stateless (no instance state)
+- Static methods only
+- Throw errors (don't catch unless re-throwing with context)
+
+---
+
+### 8. **Integration Pattern**
+
+**Rule**: All external API integrations are singleton instances exported from `@/integrations`.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { brevoIntegration, googleIntegration, asanaIntegration } = require("@/integrations");
+
+// Use singleton instances directly
+await brevoIntegration.sendTransactionalEmail({...});
+await googleIntegration.createDocument({...});
+await asanaIntegration.createProject({...});
+
+// ❌ WRONG
+const BrevoIntegration = require("@/integrations/brevo");
+const brevo = new BrevoIntegration(); // Don't instantiate directly!
+```
+
+**Integration Structure**:
+
+- Each integration is a class in `src/integrations/{name}.js`
+- Singleton instance created and exported: `const brevoIntegration = new BrevoIntegration()`
+- All integrations exported from `src/integrations/index.js`
+- Integrations handle:
+  - API authentication
+  - Rate limiting and retries
+  - Error wrapping (IntegrationError subclasses)
+  - Request/response logging via `logIntegrationCall`
+
+**Available Integrations**:
+
+- `brevoIntegration`: Email sending and inbound processing
+- `googleIntegration`: Google Workspace APIs (Docs, Drive, Forms)
+- `asanaIntegration`: Asana project management
+- `erpIntegration`: Levitate ERP API
+- `tavilyIntegration`: Tavily research API
+
+---
+
+### 9. **Route Handler Pattern**
+
+**Rule**: All async route handlers must be wrapped in `asyncHandler`. Routes delegate to services.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { asyncHandler } = require("@/middleware/errorHandler");
+const { ProjectService } = require("@/services/projectService");
+
+router.post(
+  "/projects",
+  asyncHandler(async (req, res) => {
+    const project = await ProjectService.createProject(req.body);
+    res.json({ success: true, data: project });
+  })
+);
+
+// ❌ WRONG
+router.post("/projects", async (req, res) => {
+  try {
+    const project = await ProjectService.createProject(req.body);
+    res.json({ success: true, data: project });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+**Route Structure**:
+
+- Each route file exports a router
+- Routes use `asyncHandler` wrapper (automatic error handling)
+- Routes validate input (via validation middleware)
+- Routes delegate business logic to services
+- Routes return JSON responses: `{ success: true, data: ... }`
+
+**Route Organization**:
+
+- `src/routes/actions.js`: Action link handlers (JWT-protected)
+- `src/routes/webhooks.js`: External webhook receivers
+- `src/routes/admin.js`: Admin interface routes
+- `src/routes/forms.js`: Form submission processing
+- `src/routes/workplan.js`: Workplan-specific routes
+- `src/routes/health.js`: Health check endpoints
+- `src/routes/ui/`: UI-related routes
+
+---
+
+### 10. **Worker Pattern**
+
+**Rule**: Workers are background job processors. Each worker exports a processor function.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { createLogger } = require("@/utils/logger");
+const { getPrismaClient } = require("@/database");
+const { ProjectService } = require("@/services/projectService");
+
+const logger = createLogger("worker:documentGeneration");
+const prisma = getPrismaClient();
+
+const documentGenerationProcessor = async (job) => {
+  const { data } = job;
+  const { documentId, projectId } = data;
+
+  logger.info(
+    { jobId: job.id, documentId },
+    "Processing document generation job"
+  );
+
+  try {
+    // Call services to perform work
+    const result = await ProjectService.generateDocument(documentId);
+
+    logger.info({ jobId: job.id, documentId }, "Document generation completed");
+    return result;
+  } catch (error) {
+    logger.error(
+      { jobId: job.id, error, documentId },
+      "Document generation failed"
+    );
+    throw error; // Re-throw to trigger BullMQ retry
+  }
+};
+
+module.exports = { documentGenerationProcessor };
+```
+
+**Worker Rules**:
+
+- Export processor function: `{ processorName }`
+- Receive job object with `data` property
+- Log job start/complete/failure
+- Call services (don't duplicate business logic)
+- Throw errors for retry (BullMQ handles retries automatically)
+- Return result object on success
+
+**Worker Registration**:
+
+- Workers registered in `src/workers/index.js`
+- Each worker attached to corresponding queue
+- Workers started via `npm run start:worker` or process manager
+
+---
+
+### 11. **Queue Service Pattern**
+
+**Rule**: All background jobs are added via `QueueService` methods. Never add jobs directly to queues.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { QueueService } = require("@/queues");
+
+await QueueService.addDocumentGenerationJob({
+  documentId,
+  projectId,
+  documentType: DocumentType.BRAND_ORIGIN,
+}, {
+  priority: 10, // Higher priority
+  deduplicationKey: `doc-gen-${documentId}`,
+});
+
+// ❌ WRONG
+const { docGenerationQueue } = require("@/queues");
+await docGenerationQueue.add({...}); // Don't do this!
+```
+
+**QueueService Methods**:
+
+- `addDocumentGenerationJob()`: Document generation
+- `addBrandOriginGenerationJob()`: Brand origin with deduplication
+- `addQuoteGenerationJob()`: Quote generation
+- `addWorkplanGenerationJob()`: Workplan generation
+- `addEmailParseJob()`: Email intent detection
+- Plus queue management methods (pause, resume, stats, etc.)
+
+**Job Options**:
+
+- `priority`: Higher numbers = higher priority
+- `deduplicationKey`: Prevents duplicate jobs
+- `delay`: Delay job execution
+- `attempts`: Number of retries
+
+---
+
+### 12. **Transaction Pattern**
+
+**Rule**: Use `withTransaction` for all multi-step database operations that must be atomic.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT - Multiple related operations
+const result = await withTransaction(async (tx) => {
+  const document = await tx.document.create({ data: {...} });
+  await tx.documentRevision.create({
+    data: { documentId: document.id, ... }
+  });
+  await tx.auditLog.create({
+    data: { action: "DOCUMENT_CREATED", ... }
+  });
+  return document;
+});
+
+// ✅ CORRECT - Single operation (transaction not strictly needed but OK)
+const document = await withTransaction(async (tx) => {
+  return await tx.document.create({ data: {...} });
+});
+
+// ❌ WRONG - Multiple operations without transaction
+const document = await prisma.document.create({ data: {...} });
+await prisma.documentRevision.create({ data: {...} }); // Could fail, leaving inconsistent state
+```
+
+**When to Use Transactions**:
+
+- Creating related records (document + revision + audit log)
+- Updating multiple records atomically
+- Conditional updates based on current state
+- Any operation where partial failure is unacceptable
+
+**Transaction Timeout**:
+
+- Default: 5000ms (5 seconds)
+- Override: `withTransaction(callback, { timeout: 10000 })`
+
+---
+
+### 13. **Import Organization Pattern**
+
+**Rule**: Organize imports in this order: external packages, path aliases (@/), relative imports.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT - Organized imports
+// 1. External packages
+const { Router } = require("express");
+const Joi = require("joi");
+
+// 2. Path aliases (config, constants, database, utils)
+const { appConfig } = require("@/config");
+const { DocumentType, DocumentStatus } = require("@/constants");
+const { getPrismaClient, withTransaction } = require("@/database");
+const { createLogger } = require("@/utils/logger");
+const { ValidationError } = require("@/utils/errors");
+
+// 3. Integrations
+const { brevoIntegration, googleIntegration } = require("@/integrations");
+
+// 4. Services
+const { ProjectService } = require("@/services/projectService");
+
+// 5. Middleware
+const { asyncHandler } = require("@/middleware/errorHandler");
+```
+
+---
+
+### 14. **Validation Pattern**
+
+**Rule**: Validate all inputs using Joi schemas. Use validation middleware in routes.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT - In validation file (src/utils/validation/...)
+const Joi = require("joi");
+
+const createProjectSchema = Joi.object({
+  name: Joi.string().required(),
+  clientId: Joi.number().integer().required(),
+  phase: Joi.string()
+    .valid(...Object.values(ProjectPhase))
+    .required(),
+});
+
+// ✅ CORRECT - In route
+const { validate } = require("@/middleware/validation");
+const { createProjectSchema } = require("@/utils/validation/projectValidation");
+
+router.post(
+  "/projects",
+  validate(createProjectSchema),
+  asyncHandler(async (req, res) => {
+    const project = await ProjectService.createProject(req.body);
+    res.json({ success: true, data: project });
+  })
+);
+```
+
+**Validation Locations**:
+
+- `src/utils/validation/commonValidation.js`: Common schemas
+- `src/utils/validation/formValidation.js`: Form-specific schemas
+- `src/utils/validation/webhookValidation.js`: Webhook validation schemas
+
+---
+
+### 15. **LLM Client Pattern**
+
+**Rule**: Use LLM client from `@/llm/client.js`. Provider selection is automatic based on task type.
+
+**Pattern**:
+
+```javascript
+// ✅ CORRECT
+const { createLLMClient } = require("@/llm/client");
+
+const llmClient = createLLMClient({
+  taskType: LLMTaskType.GENERATION, // or CLASSIFICATION, EXTRACTION, PLANNING
+  model: "gpt-4", // Optional, defaults based on task type
+});
+
+const result = await llmClient.generate({
+  prompt: "...",
+  schema: myZodSchema, // For structured outputs
+});
+```
+
+**LLM Task Types**:
+
+- `CLASSIFICATION`: Email intent detection, categorization
+- `EXTRACTION`: Data extraction from text
+- `GENERATION`: Document generation, content creation
+- `PLANNING`: Workplan structure planning
+
+**Provider Selection**:
+
+- Automatic based on task type and cost/performance optimization
+- Configurable via `appConfig.llm.*` settings
+- Supports OpenAI, Anthropic, Groq
+
+---
+
+### 16. **File Naming Conventions**
+
+**Services**: `*Service.js` (e.g., `projectService.js`, `emailInboundService.js`)
+**Workers**: `*.js` in `workers/` (e.g., `documentGeneration.js`, `emailIntent.js`)
+**Integrations**: `*.js` in `integrations/` (e.g., `brevo.js`, `google.js`)
+**Routes**: `*.js` in `routes/` (e.g., `webhooks.js`, `actions.js`)
+**Middleware**: `*.js` in `middleware/` (e.g., `auth.js`, `errorHandler.js`)
+**Utils**: `*.js` in `utils/` (e.g., `logger.js`, `errors.js`)
+
+---
+
+### 17. **Code Style Patterns**
+
+**Async/Await**: Always use async/await, never use callbacks or raw promises
+**Error Handling**: Always throw errors, never return error objects
+**Logging**: Always include context objects in log calls
+**Comments**: Use JSDoc for public methods, inline comments for complex logic
+**Constants**: Never use magic strings or numbers, always use constants
+**Type Safety**: Use constants and validation to ensure type safety (no TypeScript)
+
+---
+
+### 18. **Testing Patterns**
+
+**Test Structure**: Tests in `src/test/` directory
+**Test Setup**: Use `src/test/setup.js` for test configuration
+**Mocking**: Mock external integrations (Brevo, Google, Asana, etc.)
+**Database**: Use test database (configured via `DATABASE_URL` in test env)
+
+---
+
+### Summary Checklist
+
+When writing new code, ensure:
+
+- [ ] Uses `appConfig` from `@/config`, not `process.env`
+- [ ] Uses constants from `@/constants`, not magic strings
+- [ ] Uses path aliases (`@/`) for all imports
+- [ ] Creates module logger with `createLogger("module:name")`
+- [ ] Uses custom error classes from `@/utils/errors`
+- [ ] Uses `getPrismaClient()` and `withTransaction()` for database
+- [ ] Services are stateless classes with static methods
+- [ ] Routes use `asyncHandler` wrapper
+- [ ] Workers export processor functions
+- [ ] Jobs added via `QueueService` methods
+- [ ] Transactions used for multi-step operations
+- [ ] Imports organized (external → @/ → relative)
+- [ ] Input validation using Joi schemas
+- [ ] Follows file naming conventions
+
+---
+
 _This file tree documentation is maintained to help developers understand the codebase structure without reading individual files. Update this document when significant architectural changes are made._
