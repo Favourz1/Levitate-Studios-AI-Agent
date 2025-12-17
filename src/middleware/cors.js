@@ -37,6 +37,7 @@ const corsOptions = {
     "X-Correlation-ID",
     "X-Hook-Secret",
     "X-Hook-Signature",
+    "x-acting-role", // Allow frontend to pass acting role
   ],
   exposedHeaders: [
     "X-Correlation-ID",
