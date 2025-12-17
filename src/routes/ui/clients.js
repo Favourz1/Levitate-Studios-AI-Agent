@@ -95,14 +95,14 @@ router.get(
           },
           orderBy: { updatedAt: "desc" },
         },
-        emailThreads: {
-          include: {
-            emails: {
-              orderBy: { receivedAt: "desc" },
-              take: 10,
-            },
-          },
-        },
+        // emailThreads: {
+        //   include: {
+        //     emails: {
+        //       orderBy: { receivedAt: "desc" },
+        //       take: 10,
+        //     },
+        //   },
+        // },
       },
     });
 
