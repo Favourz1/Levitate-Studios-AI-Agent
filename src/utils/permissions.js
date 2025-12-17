@@ -1,5 +1,4 @@
-const { TeamRole } = require("@prisma/client");
-
+const { TeamRole } = require("@/constants");
 const ALL_PERMISSIONS = {
   documents: ["view", "acceptAndSend", "reject", "regenerate"],
   emails: ["view", "log", "delete"],

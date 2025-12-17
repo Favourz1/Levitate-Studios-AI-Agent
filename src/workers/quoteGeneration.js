@@ -142,6 +142,9 @@ const quoteGenerationProcessorImpl = async (job) => {
     );
 
     // Step 4: Create document + revision records and update phase
+    // Check if this is a regeneration from job data
+    const isRegeneration = job.data?.feedbackContext?.isRegeneration || false;
+
     const documentResult = await createQuoteDocumentRecords(
       {
         projectId,
@@ -149,6 +152,7 @@ const quoteGenerationProcessorImpl = async (job) => {
         variantIds,
         driveFiles: driveFileEntries,
         quoteItems: validatedQuoteItems,
+        isRegeneration, // Pass regeneration flag to prevent phase rollback
       },
       correlationId
     );
@@ -233,7 +237,14 @@ const quoteGenerationProcessorImpl = async (job) => {
  * Create document & revision records for quotes
  */
 async function createQuoteDocumentRecords(params, correlationId) {
-  const { projectId, mainQuoteId, variantIds, driveFiles, quoteItems } = params;
+  const {
+    projectId,
+    mainQuoteId,
+    variantIds,
+    driveFiles,
+    quoteItems,
+    isRegeneration = false,
+  } = params;
 
   return await withTransaction(async (tx) => {
     const project = await tx.project.findUnique({
@@ -306,7 +317,10 @@ async function createQuoteDocumentRecords(params, correlationId) {
       },
     });
 
-    if (project.phase !== ProjectPhase.QUOTE_DOCUMENT) {
+    // Only change project phase if NOT regenerating (document-only approach)
+    // During regeneration, we keep the existing phase to maintain consistency
+    // and prevent breaking autonomous AI agent flow
+    if (!isRegeneration && project.phase !== ProjectPhase.QUOTE_DOCUMENT) {
       await tx.project.update({
         where: { id: projectId },
         data: {
@@ -325,6 +339,15 @@ async function createQuoteDocumentRecords(params, correlationId) {
           at: new Date(),
         },
       });
+    } else if (isRegeneration) {
+      logger.info(
+        {
+          projectId,
+          currentPhase: project.phase,
+          correlationId,
+        },
+        "Quote regeneration: Keeping existing project phase (document-only approach)"
+      );
     }
 
     return {
