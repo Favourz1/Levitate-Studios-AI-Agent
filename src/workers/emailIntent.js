@@ -2468,10 +2468,320 @@ async function sendQuoteAcceptanceConfirmationEmail(
   }
 }
 
+/**
+ * Assemble context for feedback-based intent detection (UI regeneration)
+ * Similar to assembleIntentContext but for UI feedback instead of email
+ * @param {number} documentId - Document ID to analyze
+ * @param {string} feedbackText - Feedback text from UI
+ * @returns {Promise<Object>} Complete context for LLM
+ */
+async function assembleFeedbackIntentContext(documentId, feedbackText) {
+  try {
+    // Get document with all related data
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      include: {
+        project: {
+          include: {
+            client: true,
+            documents: {
+              where: {
+                status: {
+                  in: [
+                    DocumentStatus.SENT_TO_CLIENT,
+                    DocumentStatus.CLIENT_FEEDBACK,
+                    DocumentStatus.PM_REVIEW,
+                    DocumentStatus.FINANCE_MANAGER_REVIEW,
+                  ],
+                },
+              },
+              orderBy: { updatedAt: "desc" },
+              take: 10,
+              include: {
+                currentRevision: true,
+                lastSentRevision: true,
+              },
+            },
+            questionnaireResponses: {
+              orderBy: { submittedAt: "desc" },
+              take: 1,
+            },
+            thread: {
+              include: {
+                emails: {
+                  orderBy: { receivedAt: "desc" },
+                  take: 10, // Last 10 emails for context
+                },
+              },
+            },
+          },
+        },
+        currentRevision: true,
+        lastSentRevision: true,
+      },
+    });
+
+    if (!document) {
+      throw new ValidationError(`Document not found: ${documentId}`);
+    }
+
+    if (!document.project) {
+      throw new ValidationError(
+        `Document ${documentId} has no associated project`
+      );
+    }
+
+    const project = document.project;
+
+    // Get conversation history from thread emails
+    const conversationHistory =
+      project.thread?.emails?.map((e) => ({
+        direction: e.direction,
+        from: e.fromAddr,
+        subject: e.subject,
+        textBody: e.textBody,
+        receivedAt: e.receivedAt,
+        intent: e.intent,
+      })) || [];
+
+    // Get the content that was actually sent to the client
+    let sentDocumentContent = null;
+    let sentContentSource = "none";
+
+    if (document.lastSentRevision) {
+      const lastSentRevision = document.lastSentRevision;
+      const snapshotMd = lastSentRevision.snapshotMd;
+      const hasPdfFileId = snapshotMd?.pdfFileId;
+      const sourceRevisionId = snapshotMd?.sourceRevisionId;
+
+      if (hasPdfFileId && sourceRevisionId) {
+        try {
+          const sourceRevision = await prisma.documentRevision.findUnique({
+            where: { id: sourceRevisionId },
+          });
+
+          if (sourceRevision?.snapshotText) {
+            sentDocumentContent = sourceRevision.snapshotText;
+            sentContentSource = "source_revision";
+          } else if (document.driveFileId) {
+            sentDocumentContent = await googleIntegration.exportDocumentAsText(
+              document.driveFileId
+            );
+            sentContentSource = "google_drive_fallback";
+          } else {
+            sentDocumentContent = lastSentRevision.snapshotText;
+            sentContentSource = "last_sent_snapshot_fallback";
+          }
+        } catch (error) {
+          logger.warn(
+            {
+              documentId,
+              error: error.message,
+            },
+            "Failed to get sent content, using fallback"
+          );
+          if (document.driveFileId) {
+            try {
+              sentDocumentContent =
+                await googleIntegration.exportDocumentAsText(
+                  document.driveFileId
+                );
+              sentContentSource = "google_drive_error_fallback";
+            } catch (driveError) {
+              sentDocumentContent = lastSentRevision.snapshotText;
+              sentContentSource = "last_sent_snapshot_fallback";
+            }
+          } else {
+            sentDocumentContent = lastSentRevision.snapshotText;
+            sentContentSource = "last_sent_snapshot_no_drive";
+          }
+        }
+      } else {
+        sentDocumentContent = lastSentRevision.snapshotText;
+        sentContentSource = "google_docs_revision";
+      }
+    } else if (document.currentRevision) {
+      sentDocumentContent = document.currentRevision.snapshotText;
+      sentContentSource = "current_revision_fallback";
+    }
+
+    logger.info(
+      {
+        documentId,
+        projectId: project.id,
+        projectPhase: project.phase,
+        documentType: document.type,
+        conversationHistoryLength: conversationHistory.length,
+        sentContentSource,
+        sentContentLength: sentDocumentContent?.length || 0,
+      },
+      "Feedback intent context assembled successfully"
+    );
+
+    // Create a synthetic email object for compatibility with detectEmailIntent
+    return {
+      email: {
+        id: null, // No email ID for UI feedback
+        from: `ADMIN (${project.client.name})`,
+        subject: `Feedback for ${document.type} document`,
+        textBody: feedbackText,
+        htmlBody: null,
+        receivedAt: new Date(),
+      },
+      project: {
+        id: project.id,
+        name: project.name,
+        phase: project.phase,
+        client: {
+          id: project.client.id,
+          name: project.client.name,
+          email: project.client.primaryEmail,
+        },
+      },
+      currentDocument: {
+        id: document.id,
+        type: document.type,
+        status: document.status,
+        content: document.currentRevision?.snapshotText || null,
+        sentContent: sentDocumentContent,
+        sentContentSource,
+        lastSentRevisionId: document.lastSentRevisionId,
+      },
+      conversationHistory,
+      questionnaireContext: project.questionnaireResponses[0]
+        ? {
+            responses: project.questionnaireResponses[0].responses,
+            submittedAt: project.questionnaireResponses[0].submittedAt,
+          }
+        : null,
+    };
+  } catch (error) {
+    logger.error(
+      {
+        documentId,
+        error: error.message,
+      },
+      "Failed to assemble feedback intent context"
+    );
+    throw error;
+  }
+}
+
+/**
+ * Detect intent from feedback text (for UI regeneration)
+ * Reuses the same detectEmailIntent logic but with feedback context
+ * @param {number} documentId - Document ID
+ * @param {string} feedbackText - Feedback text from UI
+ * @returns {Promise<Object>} Detected intent with confidence and details
+ */
+async function detectFeedbackIntent(documentId, feedbackText) {
+  try {
+    // Assemble context from document/project/feedback
+    const context = await assembleFeedbackIntentContext(
+      documentId,
+      feedbackText
+    );
+
+    // Use the same intent detection logic
+    const intentResult = await detectEmailIntent(context);
+
+    logger.info(
+      {
+        documentId,
+        intent: intentResult.intent,
+        confidence: intentResult.confidence,
+        requestedChangesCount: intentResult.requestedChanges?.length || 0,
+      },
+      "Feedback intent detection completed"
+    );
+
+    return intentResult;
+  } catch (error) {
+    logger.error(
+      {
+        documentId,
+        error: error.message,
+      },
+      "Failed to detect feedback intent"
+    );
+    throw error;
+  }
+}
+
+/**
+ * Feedback Intent Detection Processor
+ * Processes feedback intent detection jobs from UI regeneration
+ */
+const feedbackIntentProcessor = async (job) => {
+  const startTime = Date.now();
+  const { documentId, feedbackText, correlationId } = job.data;
+
+  logger.info(
+    {
+      jobId: job.id,
+      documentId,
+      correlationId,
+    },
+    "Starting feedback intent detection"
+  );
+
+  try {
+    const intentResult = await detectFeedbackIntent(documentId, feedbackText);
+
+    const duration = Date.now() - startTime;
+
+    logger.info(
+      {
+        jobId: job.id,
+        documentId,
+        intent: intentResult.intent,
+        confidence: intentResult.confidence,
+        duration,
+        correlationId,
+      },
+      "Feedback intent detection completed successfully"
+    );
+
+    return {
+      success: true,
+      documentId,
+      intent: intentResult.intent,
+      confidence: intentResult.confidence,
+      summary: intentResult.summary,
+      requestedChanges: intentResult.requestedChanges || [],
+      reasoning: intentResult.reasoning,
+      clientSentiment: intentResult.clientSentiment,
+      urgency: intentResult.urgency,
+      documentTypeAnalysis: intentResult.documentTypeAnalysis,
+      processingTime: duration,
+    };
+  } catch (error) {
+    const duration = Date.now() - startTime;
+
+    logger.error(
+      {
+        jobId: job.id,
+        documentId,
+        error: error.message,
+        errorType: error.constructor.name,
+        duration,
+        correlationId,
+        stack: error.stack,
+      },
+      "Feedback intent detection failed"
+    );
+
+    throw error;
+  }
+};
+
 module.exports = {
   emailIntentProcessor,
+  feedbackIntentProcessor,
   assembleIntentContext,
+  assembleFeedbackIntentContext,
   detectEmailIntent,
+  detectFeedbackIntent,
   handleDetectedIntent,
   getIntentMetadataForRegeneration,
 };

@@ -23,6 +23,7 @@ const redis = new IORedis(appConfig.redis.url, {
 const QUEUE_NAMES = {
   DOC_GENERATION: "doc-generation",
   EMAIL_INTENT: "email-intent",
+  FEEDBACK_INTENT: "feedback-intent",
   ASANA_SYNC: "asana-sync",
   ASANA_PROJECT_INIT: "asana-project-init",
   QUOTE_GENERATION: "quote-generation",
@@ -35,6 +36,7 @@ const QUEUE_NAMES = {
 const queues = {
   docGeneration: new Queue(QUEUE_NAMES.DOC_GENERATION, { connection: redis }),
   emailIntent: new Queue(QUEUE_NAMES.EMAIL_INTENT, { connection: redis }),
+  feedbackIntent: new Queue(QUEUE_NAMES.FEEDBACK_INTENT, { connection: redis }),
   asanaSync: new Queue(QUEUE_NAMES.ASANA_SYNC, { connection: redis }),
   asanaProjectInit: new Queue(QUEUE_NAMES.ASANA_PROJECT_INIT, {
     connection: redis,
@@ -108,6 +110,29 @@ class QueueService {
     };
 
     return queues.emailIntent.add("parse-email", data, jobOptions);
+  }
+
+  // Feedback intent detection jobs (for UI regeneration)
+  static async addFeedbackIntentJob(data, priority = 5) {
+    const dedupeKey =
+      data.dedupeKey ||
+      `document:${data.documentId}:feedback-intent:${Date.now()}`;
+    const jobOptions = {
+      ...DEFAULT_JOB_OPTIONS,
+      priority, // High priority for regeneration
+      jobId: dedupeKey,
+    };
+
+    const jobData = {
+      ...data,
+      dedupeKey,
+    };
+
+    return queues.feedbackIntent.add(
+      "detect-feedback-intent",
+      jobData,
+      jobOptions
+    );
   }
 
   // Asana sync jobs

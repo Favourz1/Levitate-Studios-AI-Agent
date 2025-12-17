@@ -474,6 +474,8 @@ Generate the refined brand origin document now.`;
     const rawResponses = context.questionnaire?.raw || {};
     const relevantExample = context.relevantExample;
     const intentResult = feedbackContext.intentResult || {};
+    // Handle both email intent detection (has intentResult) and UI regeneration (only feedbackContext.feedback)
+    const feedbackSummary = intentResult.summary || feedbackContext.feedback || "No summary available";
 
     return `# Brand Origin Document Regeneration Task
 
@@ -492,7 +494,7 @@ Generate the refined brand origin document now.`;
 **Confidence Level:** ${Math.round((intentResult.confidence || 0) * 100)}%
 
 ### Client's Feedback Summary
-${intentResult.summary || "No summary available"}
+${feedbackSummary}
 
 ### Specific Requested Changes
 ${

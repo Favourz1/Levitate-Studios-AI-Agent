@@ -268,17 +268,83 @@ class WorkplanStrategistService {
 ## BRIEF: Slide Requirements`;
 
     // Add regeneration feedback if present
+    // Supports both raw string (backward compatible) and structured object (enhanced)
     if (regenerationFeedback) {
-      prompt += `
+      if (typeof regenerationFeedback === "string") {
+        // Backward compatible: raw text feedback
+        prompt += `
 
 **Regeneration Feedback:**
-${
-  typeof regenerationFeedback === "string"
-    ? regenerationFeedback
-    : JSON.stringify(regenerationFeedback, null, 2)
-}
+${regenerationFeedback}
 
 Please address the following feedback while maintaining strategic coherence:`;
+      } else if (regenerationFeedback.formattedFeedback) {
+        // Enhanced: structured feedback with intent detection
+        prompt += `
+
+${regenerationFeedback.formattedFeedback}
+
+Please address the following feedback while maintaining strategic coherence:`;
+
+        // Add slide-specific targeting if this slide is mentioned
+        const slideReferences = regenerationFeedback.slideReferences || [];
+        const slideTitle = slide.title || slide.slideType || "";
+        const slideTypeLower = slideType.toLowerCase();
+        const slideTitleLower = slideTitle.toLowerCase();
+
+        // Check if this slide is specifically targeted
+        const isTargeted =
+          slideReferences.length === 0 ||
+          slideReferences.some(
+            (ref) =>
+              slideTitleLower.includes(ref.toLowerCase()) ||
+              slideTypeLower.includes(ref.toLowerCase()) ||
+              ref.toLowerCase().includes(slideTypeLower) ||
+              ref.toLowerCase().includes(slideTitleLower)
+          );
+
+        if (isTargeted && regenerationFeedback.requestedChanges?.length > 0) {
+          // Filter changes relevant to this slide
+          const relevantChanges = regenerationFeedback.requestedChanges.filter(
+            (change) => {
+              if (!change.section) return true; // General change applies to all slides
+              const changeSectionLower = change.section.toLowerCase();
+              return (
+                slideTitleLower.includes(changeSectionLower) ||
+                slideTypeLower.includes(changeSectionLower) ||
+                changeSectionLower.includes(slideTypeLower) ||
+                changeSectionLower.includes(slideTitleLower)
+              );
+            }
+          );
+
+          if (relevantChanges.length > 0) {
+            prompt += `\n\n**Specific Changes for This Slide:**\n`;
+            relevantChanges.forEach((change, idx) => {
+              prompt += `${idx + 1}. ${change.change}`;
+              if (change.priority)
+                prompt += ` (Priority: ${change.priority})`;
+              if (change.feasibility)
+                prompt += ` (Complexity: ${change.feasibility})`;
+              prompt += `\n`;
+            });
+          }
+        } else if (
+          slideReferences.length > 0 &&
+          !isTargeted
+        ) {
+          // This slide is not specifically targeted - apply general feedback only
+          prompt += `\n\n**Note:** This feedback may not directly apply to this slide, but maintain strategic coherence with the overall workplan narrative.`;
+        }
+      } else {
+        // Fallback: stringify object if structure is unexpected
+        prompt += `
+
+**Regeneration Feedback:**
+${JSON.stringify(regenerationFeedback, null, 2)}
+
+Please address the following feedback while maintaining strategic coherence:`;
+      }
     }
 
     // Slide-specific requirements - ALL slide types must have specific rules

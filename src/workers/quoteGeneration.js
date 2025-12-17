@@ -29,6 +29,85 @@ const { appConfig } = require("@/config");
 
 const prisma = getPrismaClient();
 const logger = createLogger("worker:quoteGeneration");
+const { queues } = require("@/queues");
+
+/**
+ * Wait for intent detection job to complete and extract intent result
+ * @param {string} intentJobId - Intent detection job ID
+ * @param {string} correlationId - Correlation ID for logging
+ * @returns {Promise<Object|null>} Intent result or null if job not found/failed
+ */
+async function waitForIntentDetection(intentJobId, correlationId) {
+  try {
+    if (!intentJobId) {
+      return null;
+    }
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+      },
+      "Waiting for intent detection job to complete"
+    );
+
+    const intentQueue = queues.feedbackIntent;
+    const intentJob = await intentQueue.getJob(intentJobId);
+
+    if (!intentJob) {
+      logger.warn(
+        {
+          intentJobId,
+          correlationId,
+        },
+        "Intent detection job not found"
+      );
+      return null;
+    }
+
+    // Wait for job to complete (with timeout)
+    const intentResult = await Promise.race([
+      intentJob.waitUntilFinished({ timeout: 120000 }), // 120 seconds (2 minutes) timeout
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Intent detection timeout")), 60000)
+      ),
+    ]);
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+        intent: intentResult?.intent,
+        confidence: intentResult?.confidence,
+        requestedChangesCount: intentResult?.requestedChanges?.length || 0,
+      },
+      "Intent detection job completed"
+    );
+
+    // Extract intent result in the format expected by workers
+    return {
+      intent: intentResult?.intent || "DOC_FEEDBACK",
+      confidence: intentResult?.confidence || 0.8,
+      summary: intentResult?.summary || "",
+      requestedChanges: intentResult?.requestedChanges || [],
+      reasoning: intentResult?.reasoning || "",
+      clientSentiment: intentResult?.clientSentiment || null,
+      urgency: intentResult?.urgency || null,
+      documentTypeAnalysis: intentResult?.documentTypeAnalysis || null,
+    };
+  } catch (error) {
+    logger.error(
+      {
+        intentJobId,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to wait for intent detection - will use fallback"
+    );
+    // Return null to use fallback (raw feedback)
+    return null;
+  }
+}
 
 /**
  * Main Quote Processor
@@ -730,10 +809,20 @@ const updateQuoteProcessor = async (job) => {
     projectId,
     documentId,
     feedbackContext,
-    intentResult,
+    intentResult, // May be provided directly (email flow) or null (UI flow)
+    intentJobId, // For UI regeneration: job ID to wait for
     correlationId: jobCorrelationId,
   } = job.data || {};
   const correlationId = jobCorrelationId || crypto.randomUUID();
+
+  // If intentJobId provided but intentResult not provided, wait for intent detection
+  let finalIntentResult = intentResult;
+  if (!finalIntentResult && intentJobId) {
+    finalIntentResult = await waitForIntentDetection(
+      intentJobId,
+      correlationId
+    );
+  }
 
   if (!projectId || typeof projectId !== "number") {
     const message = "Quote update job missing valid projectId";
@@ -1102,8 +1191,11 @@ const updateQuoteProcessor = async (job) => {
           webViewLink: driveFile.webViewLink,
         },
         quoteItems: validatedQuoteItems,
-        feedbackSummary: intentResult.summary,
-        requestedChanges: intentResult.requestedChanges || [],
+        feedbackSummary:
+          finalIntentResult?.summary ||
+          feedbackContext?.feedback ||
+          "Client feedback provided",
+        requestedChanges: finalIntentResult?.requestedChanges || [],
       };
 
       const revision = await tx.documentRevision.create({
@@ -1114,7 +1206,7 @@ const updateQuoteProcessor = async (job) => {
           snapshotMd: revisionPayload,
           createdBy: CreatedBy.AGENT,
           summary: `Quote updated based on client feedback. ${
-            intentResult.requestedChanges?.length || 0
+            finalIntentResult?.requestedChanges?.length || 0
           } changes requested.`,
           createdAt: new Date(),
         },
@@ -1152,8 +1244,12 @@ const updateQuoteProcessor = async (job) => {
             updatedQuoteId: finalQuoteId,
             wasAmended: finalQuoteId !== selectedQuoteId,
             itemCount: validatedQuoteItems.length,
-            feedbackSummary: intentResult.summary,
-            requestedChangesCount: intentResult.requestedChanges?.length || 0,
+            feedbackSummary:
+              finalIntentResult?.summary ||
+              feedbackContext?.feedback ||
+              "Client feedback provided",
+            requestedChangesCount:
+              finalIntentResult?.requestedChanges?.length || 0,
             correlationId,
           },
           at: new Date(),
@@ -1245,8 +1341,11 @@ const updateQuoteProcessor = async (job) => {
               previousQuoteId: selectedQuoteId,
               wasAmended: finalQuoteId !== selectedQuoteId,
               driveFile,
-              feedbackSummary: intentResult.summary,
-              requestedChanges: intentResult.requestedChanges || [],
+              feedbackSummary:
+                finalIntentResult?.summary ||
+                feedbackContext?.feedback ||
+                "Client feedback provided",
+              requestedChanges: finalIntentResult?.requestedChanges || [],
               sendToClientToken,
             }
           );
@@ -1307,7 +1406,7 @@ const updateQuoteProcessor = async (job) => {
         const commentHtml = `<body>
 💼 <strong>Quote Updated Based on Client Feedback</strong>
 The quote has been updated based on client feedback. ${
-          intentResult.requestedChanges?.length || 0
+          finalIntentResult?.requestedChanges?.length || 0
         } changes were requested.
 
 ${financeMention} please review the updated quote via email sent to you and send to client if approved.

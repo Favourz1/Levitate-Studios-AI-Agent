@@ -10,11 +10,13 @@ const { getPrismaClient } = require("@/database");
 const { requireAuthForUI } = require("@/middleware/auth");
 const { requirePermission } = require("@/utils/permissions");
 const { DocumentSendingService } = require("@/services/documentSendingService");
-const { QueueService } = require("@/queues");
+const { QueueService, queues, QUEUE_NAMES } = require("@/queues");
+const { createLogger } = require("@/utils/logger");
 const { DocumentType, DocumentStatus, AuditActions } = require("@/constants");
 const { generateUuid } = require("@/utils");
 
 const prisma = getPrismaClient();
+const logger = createLogger("route:documents");
 
 /**
  * GET /api/v1/ui/documents/:id
@@ -153,7 +155,11 @@ router.post(
         if (!validQuoteIds.includes(quoteId.toString())) {
           return sendErrorResponse(
             res,
-            `Invalid quote ID. Quote ID must be the main quote (${document.erpQuoteId}) or one of the variants (${document.erpVariantIds?.join(", ") || "none"}).`,
+            `Invalid quote ID. Quote ID must be the main quote (${
+              document.erpQuoteId
+            }) or one of the variants (${
+              document.erpVariantIds?.join(", ") || "none"
+            }).`,
             StatusCodes.BAD_REQUEST
           );
         }
@@ -367,6 +373,36 @@ router.post(
     // Handle regeneration based on document type using QueueService
     let job;
     let regenerationResult;
+    let intentJob = null;
+
+    // For BRAND_ORIGIN, QUOTE, and WORKPLAN: queue intent detection first
+    // Intent detection provides structured feedback (requestedChanges, slideReferences)
+    // which enhances prompt quality and enables slide-specific targeting
+    if (
+      document.type === DocumentType.BRAND_ORIGIN ||
+      document.type === DocumentType.QUOTE ||
+      document.type === DocumentType.WORKPLAN
+    ) {
+      // Queue feedback intent detection job
+      intentJob = await QueueService.addFeedbackIntentJob(
+        {
+          documentId: document.id,
+          feedbackText: feedbackText,
+          correlationId: correlationId,
+        },
+        6 // Very high priority for intent detection
+      );
+
+      logger.info(
+        {
+          documentId: document.id,
+          documentType: document.type,
+          intentJobId: intentJob.id,
+          correlationId,
+        },
+        "Feedback intent detection job queued"
+      );
+    }
 
     if (document.type === DocumentType.BRAND_ORIGIN) {
       // For brand origin: use addBrandOriginGenerationJob with feedbackContext
@@ -380,6 +416,7 @@ router.post(
             actorId: userId,
             actingRole: actingRole,
           },
+          intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
         },
         5 // High priority for regeneration
       );
@@ -388,6 +425,7 @@ router.post(
         documentId: document.id,
         documentType: document.type,
         jobId: job?.id || null,
+        intentJobId: intentJob?.id || null,
         message: "Brand origin regeneration queued",
       };
     } else if (document.type === DocumentType.QUOTE) {
@@ -405,6 +443,7 @@ router.post(
               actorId: userId,
               actingRole: actingRole,
             },
+            intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
           },
           5 // High priority
         );
@@ -419,6 +458,7 @@ router.post(
               originalDocumentId: document.id,
               feedback: feedbackText,
             },
+            intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
           },
           5 // High priority
         );
@@ -428,13 +468,18 @@ router.post(
         documentId: document.id,
         documentType: document.type,
         jobId: job?.id || null,
+        intentJobId: intentJob?.id || null,
         message: "Quote regeneration queued",
       };
     } else if (document.type === DocumentType.WORKPLAN) {
       // For workplan: use addWorkplanGenerationJob with isRegeneration flag
-      const { WorkplanPlannerService } = require("@/services/workplanPlannerService");
-      const serviceType =
-        await WorkplanPlannerService.getServiceType(document.projectId);
+      // Intent detection enhances feedback with structured changes and slide-specific targeting
+      const {
+        WorkplanPlannerService,
+      } = require("@/services/workplanPlannerService");
+      const serviceType = await WorkplanPlannerService.getServiceType(
+        document.projectId
+      );
 
       job = await QueueService.addWorkplanGenerationJob(
         {
@@ -442,7 +487,8 @@ router.post(
           serviceType: serviceType,
           documentId: document.id,
           isRegeneration: true,
-          regenerationReason: feedbackText,
+          regenerationReason: feedbackText, // Keep raw text for backward compatibility
+          intentJobId: intentJob?.id || null, // Pass intent job ID to wait for structured result
         },
         5 // High priority
       );
@@ -451,6 +497,7 @@ router.post(
         documentId: document.id,
         documentType: document.type,
         jobId: job?.id || null,
+        intentJobId: intentJob?.id || null,
         message: "Workplan regeneration queued",
       };
     } else {

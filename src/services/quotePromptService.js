@@ -620,7 +620,7 @@ Generate the variant quote items array now.`;
    * Generate prompt for quote update based on client feedback
    * @param {Array} currentQuoteItems - Current quote items from ERP
    * @param {Object} feedbackContext - Client feedback context
-   * @param {Object} intentResult - Intent detection result with requested changes
+   * @param {Object} intentResult - Intent detection result with requested changes (optional, undefined for UI regeneration)
    * @param {Object} context - Original project context
    * @returns {string} Quote update prompt
    */
@@ -630,9 +630,14 @@ Generate the variant quote items array now.`;
     intentResult,
     context
   ) {
-    const requestedChanges = intentResult.requestedChanges || [];
-    const clientEmail = feedbackContext.emailInfo?.textBody || "";
-    const summary = intentResult.summary || "";
+    // Handle both email intent detection (has intentResult) and UI regeneration (only feedbackContext.feedback)
+    const requestedChanges = intentResult?.requestedChanges || [];
+    const clientEmail =
+      feedbackContext.emailInfo?.textBody || feedbackContext.feedback || "";
+    const summary =
+      intentResult?.summary ||
+      feedbackContext.feedback ||
+      "Client feedback provided";
 
     return `# Quote Update Task Based on Client Feedback
 

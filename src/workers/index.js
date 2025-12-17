@@ -5,7 +5,10 @@ const { setupGlobalErrorHandlers } = require("@/middleware/errorHandler");
 
 // Import worker processors
 const { documentGenerationProcessor } = require("@/workers/documentGeneration");
-const { emailIntentProcessor } = require("@/workers/emailIntent");
+const {
+  emailIntentProcessor,
+  feedbackIntentProcessor,
+} = require("@/workers/emailIntent");
 const { asanaSyncProcessor } = require("@/workers/asanaSync");
 const { asanaProjectInitProcessor } = require("@/workers/asanaProjectInit");
 const { quoteGenerationProcessor } = require("@/workers/quoteGeneration");
@@ -42,6 +45,11 @@ const startWorkers = async () => {
         name: QUEUE_NAMES.EMAIL_INTENT,
         processor: emailIntentProcessor,
         concurrency: 5, // Higher concurrency for email processing
+      },
+      {
+        name: QUEUE_NAMES.FEEDBACK_INTENT,
+        processor: feedbackIntentProcessor,
+        concurrency: 3, // Moderate concurrency for feedback intent detection
       },
       {
         name: QUEUE_NAMES.ASANA_SYNC,

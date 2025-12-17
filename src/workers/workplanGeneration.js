@@ -35,6 +35,127 @@ const { generateUuid, retry } = require("@/utils");
 
 const logger = createLogger("worker:workplanGeneration");
 const prisma = getPrismaClient();
+const { queues } = require("@/queues");
+
+/**
+ * Wait for intent detection job to complete and extract intent result
+ * @param {string} intentJobId - Intent detection job ID
+ * @param {string} correlationId - Correlation ID for logging
+ * @returns {Promise<Object|null>} Intent result or null if job not found/failed
+ */
+async function waitForIntentDetection(intentJobId, correlationId) {
+  try {
+    if (!intentJobId) {
+      return null;
+    }
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+      },
+      "Waiting for intent detection job to complete"
+    );
+
+    const intentQueue = queues.feedbackIntent;
+    const intentJob = await intentQueue.getJob(intentJobId);
+
+    if (!intentJob) {
+      logger.warn(
+        {
+          intentJobId,
+          correlationId,
+        },
+        "Intent detection job not found"
+      );
+      return null;
+    }
+
+    // Wait for job to complete (with timeout)
+    const intentResult = await Promise.race([
+      intentJob.waitUntilFinished({ timeout: 120000 }), // 120 seconds (2 minutes) timeout
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Intent detection timeout")), 120000)
+      ),
+    ]);
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+        intent: intentResult?.intent,
+        confidence: intentResult?.confidence,
+        requestedChangesCount: intentResult?.requestedChanges?.length || 0,
+        slideReferencesCount:
+          intentResult?.documentTypeAnalysis?.sectionReferences?.length || 0,
+      },
+      "Intent detection job completed"
+    );
+
+    // Extract intent result in the format expected by workers
+    return {
+      intent: intentResult?.intent || "DOC_FEEDBACK",
+      confidence: intentResult?.confidence || 0.8,
+      summary: intentResult?.summary || "",
+      requestedChanges: intentResult?.requestedChanges || [],
+      reasoning: intentResult?.reasoning || "",
+      clientSentiment: intentResult?.clientSentiment || null,
+      urgency: intentResult?.urgency || null,
+      documentTypeAnalysis: intentResult?.documentTypeAnalysis || null,
+    };
+  } catch (error) {
+    logger.error(
+      {
+        intentJobId,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to wait for intent detection - will use fallback"
+    );
+    // Return null to use fallback (raw feedback)
+    return null;
+  }
+}
+
+/**
+ * Format workplan feedback with structured intent for prompt enhancement
+ * @param {Object} intentResult - Intent detection result
+ * @param {string} rawFeedback - Original raw feedback text
+ * @returns {string} Formatted feedback string for prompts
+ */
+function formatWorkplanFeedback(intentResult, rawFeedback) {
+  let formatted = `## Regeneration Feedback Summary\n${
+    intentResult.summary || rawFeedback
+  }\n\n`;
+
+  if (intentResult.requestedChanges?.length > 0) {
+    formatted += `### Specific Changes Requested:\n`;
+    intentResult.requestedChanges.forEach((change, idx) => {
+      formatted += `${idx + 1}. ${
+        change.section ? `[${change.section}] ` : ""
+      }${change.change}`;
+      if (change.priority) formatted += ` (Priority: ${change.priority})`;
+      if (change.feasibility)
+        formatted += ` (Complexity: ${change.feasibility})`;
+      formatted += `\n`;
+    });
+  }
+
+  // Add slide-specific targeting
+  if (intentResult.documentTypeAnalysis?.sectionReferences?.length > 0) {
+    formatted += `\n### Affected Slides:\n`;
+    formatted += intentResult.documentTypeAnalysis.sectionReferences
+      .map((ref) => `- ${ref}`)
+      .join("\n");
+  }
+
+  // Add urgency/priority context
+  if (intentResult.urgency) {
+    formatted += `\n### Feedback Priority: ${intentResult.urgency.toUpperCase()}\n`;
+  }
+
+  return formatted;
+}
 
 /**
  * Workplan Generation Processor
@@ -52,12 +173,60 @@ const workplanGenerationProcessor = async (job) => {
     serviceType: providedServiceType,
     documentId: providedDocumentId,
     isRegeneration = false,
-    regenerationReason,
+    regenerationReason, // Raw text feedback (backward compatible)
+    intentJobId, // New: for structured intent detection
     retryCount = 0,
     correlationId: providedCorrelationId,
   } = job.data || {};
 
   const correlationId = providedCorrelationId || generateUuid();
+
+  // Wait for intent detection if provided (for enhanced structured feedback)
+  let structuredIntent = null;
+  if (isRegeneration && intentJobId) {
+    structuredIntent = await waitForIntentDetection(intentJobId, correlationId);
+  }
+
+  // Build enhanced regeneration feedback
+  // Supports both raw text (backward compatible) and structured intent (enhanced)
+  let regenerationFeedback = regenerationReason || null;
+  if (isRegeneration && structuredIntent) {
+    // Enhance with structured intent while preserving raw text
+    regenerationFeedback = {
+      rawFeedback: regenerationReason, // Original text for fallback
+      summary: structuredIntent.summary,
+      requestedChanges: structuredIntent.requestedChanges || [],
+      slideReferences:
+        structuredIntent.documentTypeAnalysis?.sectionReferences || [],
+      priority: structuredIntent.urgency || "medium",
+      clientSentiment: structuredIntent.clientSentiment || null,
+      // Format for prompt use
+      formattedFeedback: formatWorkplanFeedback(
+        structuredIntent,
+        regenerationReason
+      ),
+    };
+
+    logger.info(
+      {
+        documentId: providedDocumentId,
+        requestedChangesCount: structuredIntent.requestedChanges?.length || 0,
+        slideReferencesCount:
+          structuredIntent.documentTypeAnalysis?.sectionReferences?.length || 0,
+        correlationId,
+      },
+      "Using enhanced structured feedback for workplan regeneration"
+    );
+  } else if (isRegeneration && regenerationReason) {
+    // Fallback: use raw text (backward compatible)
+    logger.info(
+      {
+        documentId: providedDocumentId,
+        correlationId,
+      },
+      "Using raw text feedback for workplan regeneration (intent detection not available)"
+    );
+  }
 
   logger.info(
     {
@@ -131,7 +300,7 @@ const workplanGenerationProcessor = async (job) => {
       questionnaire: project.questionnaireResponses?.[0],
       brandOrigin: brandOrigin?.revisions?.[0],
       serviceType,
-      regenerationFeedback: regenerationReason || null,
+      regenerationFeedback, // Now enhanced with structured intent if available
     };
 
     // Agent A: Planner
@@ -186,7 +355,7 @@ const workplanGenerationProcessor = async (job) => {
       }
 
       slides = existingDoc.workplanSlides || [];
-      context.regenerationFeedback = regenerationReason || null;
+      // regenerationFeedback already set above with enhanced structured intent if available
     }
 
     // Ensure we have slides loaded
@@ -526,11 +695,38 @@ async function slideRegenerationProcessor(job) {
     documentId,
     slideId,
     regenerationReason = null,
+    intentJobId, // For structured intent detection
     retryCount = 0,
     correlationId: providedCorrelationId,
   } = job.data || {};
 
   const correlationId = providedCorrelationId || generateUuid();
+
+  // For slide regeneration, also check for intent detection
+  let slideStructuredIntent = null;
+  if (intentJobId) {
+    slideStructuredIntent = await waitForIntentDetection(
+      intentJobId,
+      correlationId
+    );
+  }
+
+  // Build enhanced regeneration feedback for slide regeneration
+  let slideRegenerationFeedback = regenerationReason || null;
+  if (slideStructuredIntent) {
+    slideRegenerationFeedback = {
+      rawFeedback: regenerationReason,
+      summary: slideStructuredIntent.summary,
+      requestedChanges: slideStructuredIntent.requestedChanges || [],
+      slideReferences:
+        slideStructuredIntent.documentTypeAnalysis?.sectionReferences || [],
+      priority: slideStructuredIntent.urgency || "medium",
+      formattedFeedback: formatWorkplanFeedback(
+        slideStructuredIntent,
+        regenerationReason
+      ),
+    };
+  }
 
   logger.info(
     {
@@ -604,7 +800,7 @@ async function slideRegenerationProcessor(job) {
       questionnaire: project.questionnaireResponses?.[0],
       brandOrigin: brandOrigin?.revisions?.[0],
       serviceType,
-      regenerationFeedback: regenerationReason || null,
+      regenerationFeedback: slideRegenerationFeedback,
       documentId,
     };
 

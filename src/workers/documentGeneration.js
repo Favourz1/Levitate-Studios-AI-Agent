@@ -23,6 +23,7 @@ const {
 const logger = createLogger("worker:documentGeneration");
 const prisma = getPrismaClient();
 const { appConfig } = require("@/config");
+const { queues } = require("@/queues");
 const { isFinancialDocument } = require("@/utils");
 const {
   DocumentType,
@@ -46,9 +47,108 @@ const {
  * - Asana task movement and PM notification
  * - Email notification to PM with Review/Send buttons
  */
+/**
+ * Wait for intent detection job to complete and extract intent result
+ * @param {string} intentJobId - Intent detection job ID
+ * @param {string} correlationId - Correlation ID for logging
+ * @returns {Promise<Object|null>} Intent result or null if job not found/failed
+ */
+async function waitForIntentDetection(intentJobId, correlationId) {
+  try {
+    if (!intentJobId) {
+      return null;
+    }
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+      },
+      "Waiting for intent detection job to complete"
+    );
+
+    const intentQueue = queues.feedbackIntent;
+    const intentJob = await intentQueue.getJob(intentJobId);
+
+    if (!intentJob) {
+      logger.warn(
+        {
+          intentJobId,
+          correlationId,
+        },
+        "Intent detection job not found"
+      );
+      return null;
+    }
+
+    // Wait for job to complete (with timeout)
+    const intentResult = await Promise.race([
+      intentJob.waitUntilFinished({ timeout: 120000 }), // 120 seconds (2 minutes) timeout
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Intent detection timeout")), 120000)
+      ),
+    ]);
+
+    logger.info(
+      {
+        intentJobId,
+        correlationId,
+        intent: intentResult?.intent,
+        confidence: intentResult?.confidence,
+        requestedChangesCount: intentResult?.requestedChanges?.length || 0,
+      },
+      "Intent detection job completed"
+    );
+
+    // Extract intent result in the format expected by workers
+    return {
+      intent: intentResult?.intent || "DOC_FEEDBACK",
+      confidence: intentResult?.confidence || 0.8,
+      summary: intentResult?.summary || "",
+      requestedChanges: intentResult?.requestedChanges || [],
+      reasoning: intentResult?.reasoning || "",
+      clientSentiment: intentResult?.clientSentiment || null,
+      urgency: intentResult?.urgency || null,
+      documentTypeAnalysis: intentResult?.documentTypeAnalysis || null,
+    };
+  } catch (error) {
+    logger.error(
+      {
+        intentJobId,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to wait for intent detection - will use fallback"
+    );
+    // Return null to use fallback (raw feedback)
+    return null;
+  }
+}
+
 const brandOriginGenerationProcessor = async (job) => {
   const startTime = Date.now();
-  const { projectId, dedupeKey, correlationId, feedbackContext } = job.data;
+  const {
+    projectId,
+    dedupeKey,
+    correlationId,
+    feedbackContext: originalFeedbackContext,
+    intentJobId,
+  } = job.data;
+
+  // If intentJobId provided but intentResult not in feedbackContext, wait for intent detection
+  let feedbackContext = originalFeedbackContext;
+  if (feedbackContext && !feedbackContext.intentResult && intentJobId) {
+    const intentResult = await waitForIntentDetection(
+      intentJobId,
+      correlationId
+    );
+    if (intentResult) {
+      feedbackContext = {
+        ...feedbackContext,
+        intentResult,
+      };
+    }
+  }
 
   logger.info(
     {
@@ -1577,7 +1677,11 @@ The AI agent has successfully regenerated the brand origin document for <strong>
         }">View Regenerated Brand Origin Document</a>
 
 <strong>Client Feedback Summary:</strong>
-${feedbackContext.intentResult?.summary || "No summary available"}
+${
+  feedbackContext.intentResult?.summary ||
+  feedbackContext.feedback ||
+  "No summary available"
+}
 
 <strong>Changes Implemented:</strong>
 ${
