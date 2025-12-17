@@ -9,9 +9,9 @@ const { StatusCodes } = require("http-status-codes");
 const { getPrismaClient } = require("@/database");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { EmailService } = require("@/services/emailService");
 const { appConfig } = require("@/config");
 const { TeamRole } = require("@/constants");
+const { brevoIntegration } = require("@/integrations");
 
 const prisma = getPrismaClient();
 
@@ -36,7 +36,7 @@ router.post(
     }
 
     // Check if email matches ADMIN_EMAIL env or exists as admin in database
-    const adminEmailEnv = process.env.ADMIN_EMAIL;
+    const adminEmailEnv = appConfig.server.adminEmail;
     const isAdminEmail =
       adminEmailEnv && email.toLowerCase() === adminEmailEnv.toLowerCase();
 
@@ -76,13 +76,16 @@ router.post(
     });
 
     // Send verification code via email
-    await EmailService.sendEmail({
-      to: email,
+    await brevoIntegration.sendTransactionalEmail({
+      senderEmail: `noreply@${appConfig.emailDomain}`,
+      to: [email],
       subject: "Admin Signup Verification Code",
-      html: `
+      htmlContent: `
         <h2>Admin Signup Verification</h2>
         <p>Your verification code is: <strong>${code}</strong></p>
         <p>This code will expire in 10 minutes.</p>
+        <hr>
+        <p><small>This is a notification from Levitate Studios AI Agent.</small></p>
       `,
     });
 
@@ -157,7 +160,11 @@ router.post(
       });
     } else {
       verificationCodes.delete(email.toLowerCase());
-      return sendErrorResponse(res, "Email not found", StatusCodes.NOT_FOUND);
+      return sendErrorResponse(
+        res,
+        "Email not found in team members, please contact your developer to add you to the team",
+        StatusCodes.NOT_FOUND
+      );
     }
 
     // Clean up verification code
