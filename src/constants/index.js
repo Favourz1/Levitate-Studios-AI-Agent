@@ -142,6 +142,13 @@ const TeamRole = {
   COPY_WRITER: "COPY_WRITER",
 };
 
+const CriticalTeamRoles = [
+  TeamRole.ADMIN,
+  TeamRole.CREATIVE_DIRECTOR,
+  TeamRole.PROJECT_MANAGER,
+  TeamRole.FINANCE_MANAGER,
+];
+
 // Brand Assets
 const BrandAssets = {
   LEVITATE_LOGO_FILE_ID: "1_QMmI4uJVrmOISru8027mE0hOaGuYI6O", // Google Drive file ID for logo
@@ -270,6 +277,13 @@ const AuditActions = {
   // Email audit actions
   LOG_EMAIL: "LOG_EMAIL",
   DELETE_EMAIL: "DELETE_EMAIL",
+  // Team management audit actions
+  CREATE_TEAM_MEMBER: "CREATE_TEAM_MEMBER",
+  UPDATE_TEAM_MEMBER: "UPDATE_TEAM_MEMBER",
+  REACTIVATE_TEAM_MEMBER: "REACTIVATE_TEAM_MEMBER",
+  DELETE_TEAM_MEMBER: "DELETE_TEAM_MEMBER",
+  SET_TEAM_MEMBER_PASSWORD: "SET_TEAM_MEMBER_PASSWORD",
+  UPDATE_ROLE_PERMISSION_OVERRIDES: "UPDATE_ROLE_PERMISSION_OVERRIDES",
 };
 
 // System Email Addresses
@@ -371,6 +385,7 @@ module.exports = {
   JobStatus,
   WebhookProvider,
   TeamRole,
+  CriticalTeamRoles,
   BrandAssets,
   LEVITATE_BRAND_GUIDELINES,
   DesignLayout,
