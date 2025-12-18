@@ -28,6 +28,13 @@ const logger = createLogger("routes:workplan");
 router.post(
   "/:documentId/slide/:slideId/regenerate",
   asyncHandler(async (req, res) => {
+    // Early exit: API temporarily disabled
+    return sendErrorResponse(
+      res,
+      "This API is currently disabled for now.",
+      503
+    );
+
     // TODO: Track who requested to send completion email from worker when done.
     const documentId = parseInt(req.params.documentId, 10);
     const slideId = parseInt(req.params.slideId, 10);
@@ -128,6 +135,13 @@ router.post(
 router.post(
   "/:documentId/regenerate",
   asyncHandler(async (req, res) => {
+    // Early exit: API temporarily disabled
+    return sendErrorResponse(
+      res,
+      "This API is currently disabled for now.",
+      503
+    );
+
     const documentId = parseInt(req.params.documentId, 10);
     const reason = req.body?.reason || null;
 
