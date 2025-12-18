@@ -154,6 +154,7 @@ router.post(
           emailId: email.id,
           direction,
           subject,
+          name: req.user.name,
         },
       },
     });
@@ -215,7 +216,7 @@ router.delete(
         actor: userId.toString(),
         actingRole,
         action: AuditActions.DELETE_EMAIL,
-        details: { emailId: email.id },
+        details: { emailId: email.id, name: req.user.name },
       },
     });
 

@@ -187,6 +187,7 @@ router.post(
               selectedBy: userId,
               actingRole: actingRole,
               source: "UI",
+              name: req.user.name,
             },
             at: new Date(),
           },

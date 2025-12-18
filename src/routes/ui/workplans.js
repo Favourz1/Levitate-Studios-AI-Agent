@@ -135,6 +135,7 @@ router.post(
           requestedBy: userId,
           actingRole: actingRole,
           source: "UI",
+          name: req.user.name,
         },
         at: new Date(),
       },
@@ -201,10 +202,7 @@ router.post(
 
     // Status validation for slide: Cannot regenerate if in RESEARCHING or GENERATING
     // Note: SlideStatus doesn't have DRAFT, but we check RESEARCHING and GENERATING
-    const invalidStatuses = [
-      SlideStatus.RESEARCHING,
-      SlideStatus.GENERATING,
-    ];
+    const invalidStatuses = [SlideStatus.RESEARCHING, SlideStatus.GENERATING];
     if (
       invalidStatuses.includes(slide.researchStatus) ||
       invalidStatuses.includes(slide.contentStatus) ||
@@ -259,6 +257,7 @@ router.post(
           requestedBy: userId,
           actingRole: actingRole,
           source: "UI",
+          name: req.user.name,
         },
         at: new Date(),
       },
