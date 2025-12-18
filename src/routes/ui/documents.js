@@ -411,10 +411,12 @@ router.post(
           projectId: document.projectId,
           feedbackContext: {
             isRegeneration: true,
+            isUIRegeneration: true, // Flag to distinguish UI regeneration from email intent regeneration
             originalDocumentId: document.id,
             feedback: feedbackText,
             actorId: userId,
             actingRole: actingRole,
+            source: "UI",
           },
           intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
         },
@@ -439,9 +441,11 @@ router.post(
             documentId: document.id,
             feedbackContext: {
               isRegeneration: true,
+              isUIRegeneration: true, // Flag to distinguish UI regeneration from email intent regeneration
               feedback: feedbackText,
               actorId: userId,
               actingRole: actingRole,
+              source: "UI",
             },
             intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
           },
@@ -455,8 +459,10 @@ router.post(
             dedupeKey: `project:${document.projectId}:quote:regenerate:${document.id}`,
             feedbackContext: {
               isRegeneration: true,
+              isUIRegeneration: true, // Flag to distinguish UI regeneration from email intent regeneration
               originalDocumentId: document.id,
               feedback: feedbackText,
+              source: "UI",
             },
             intentJobId: intentJob?.id || null, // Pass intent job ID to wait for result
           },
@@ -487,6 +493,7 @@ router.post(
           serviceType: serviceType,
           documentId: document.id,
           isRegeneration: true,
+          isUIRegeneration: true, // Flag to distinguish UI regeneration from email intent regeneration
           regenerationReason: feedbackText, // Keep raw text for backward compatibility
           intentJobId: intentJob?.id || null, // Pass intent job ID to wait for structured result
         },

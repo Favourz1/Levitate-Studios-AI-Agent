@@ -140,10 +140,13 @@ class EmailTemplateService {
     project,
     asanaProjectUrl,
     projectDocuments = [],
-    includeFinancials = true
+    includeFinancials = true,
+    isUIRegeneration = false
   ) {
     try {
-      const subject = `Project Initialized: ${project.name}`;
+      const subject = `Project Initialized${
+        isUIRegeneration ? " (Workplan Regenerated)" : ""
+      }: ${project.name}`;
       const asanaLink = asanaProjectUrl
         ? `<p><a href="${asanaProjectUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Asana Project →</a></p>`
         : "";
@@ -213,13 +216,21 @@ class EmailTemplateService {
           <li>Sections created: "To Do", "In Progress", "In Review", "Completed"</li>
           <li>Team members selected and added to the project</li>
           <li>Project description generated and added</li>
-          <li>Workplan document generated and added for creative director review.</li>
+          <li>Workplan document ${
+            isUIRegeneration
+              ? "manually regenerated from the UI and"
+              : "generated and"
+          } added for creative director review.</li>
         </ul>
         
         ${documentLinksHtml}
         
         <h3>Next Steps</h3>
-        <p>The project is now ready for task assignment. Team members have been added to the Asana project and can start working on tasks.</p>
+        <p>${
+          isUIRegeneration
+            ? "The workplan has been manually regenerated from the UI. Please review the updated workplan document."
+            : "The project is now ready for task assignment. Team members have been added to the Asana project and can start working on tasks."
+        }</p>
         
         ${asanaLink}
                 
@@ -255,13 +266,26 @@ class EmailTemplateService {
    * @param {number} slideCount - Number of slides in the workplan
    * @returns {{subject:string, htmlContent:string}}
    */
-  static generateWorkplanCompletionTemplate(project, googleDocUrl, slideCount) {
+  static generateWorkplanCompletionTemplate(
+    project,
+    googleDocUrl,
+    slideCount,
+    isUIRegeneration = false
+  ) {
     const safeSlideCount = Number.isFinite(slideCount) ? slideCount : 0;
-    const subject = `Workplan Ready for Review: ${project.name}`;
+    const subject = `Workplan Ready for Review${
+      isUIRegeneration ? " (Regenerated)" : ""
+    }: ${project.name}`;
 
     const htmlContent = `
-      <h2>Workplan Generated Successfully</h2>
-      <p>The AI agent has completed the workplan document with research, strategic content, and design directives.</p>
+      <h2>Workplan ${
+        isUIRegeneration ? "Regenerated" : "Generated"
+      } Successfully</h2>
+      <p>${
+        isUIRegeneration
+          ? "The workplan document has been manually regenerated from the UI with research, strategic content, and design directives."
+          : "The AI agent has completed the workplan document with research, strategic content, and design directives."
+      }</p>
 
       <h3>Project Details</h3>
       <ul>
@@ -528,9 +552,10 @@ class EmailTemplateService {
     feedbackContext = {}
   ) {
     try {
-      const subject = `🔄 Brand Origin Document Regenerated - ${
-        project.client?.name || "Client"
-      } - ${project.name}`;
+      const isUIRegeneration = feedbackContext?.isUIRegeneration || false;
+      const subject = `🔄 Brand Origin Document Regenerated${
+        isUIRegeneration ? " (Manual Request)" : ""
+      } - ${project.client?.name || "Client"} - ${project.name}`;
 
       const reviewUrl = actionTokens.generateLinkToken
         ? `${appConfig.server.baseUrl}/api/v1/actions/review?t=${actionTokens.generateLinkToken}`
@@ -569,8 +594,14 @@ class EmailTemplateService {
         <body>
           <div class="container">
             <div class="header">
-              <h1><span class="icon">🔄</span>Brand Origin Document Regenerated</h1>
-              <p>AI has regenerated the brand strategy document based on client feedback</p>
+              <h1><span class="icon">🔄</span>Brand Origin Document Regenerated${
+                isUIRegeneration ? " (Manual Request)" : ""
+              }</h1>
+              <p>${
+                isUIRegeneration
+                  ? "The brand strategy document has been manually regenerated from the UI based on provided feedback"
+                  : "AI has regenerated the brand strategy document based on client email feedback"
+              }</p>
             </div>
             
             <div class="content">
@@ -586,7 +617,9 @@ class EmailTemplateService {
                 </ul>
               </div>
 
-              <div class="intent-info">
+              ${
+                !isUIRegeneration
+                  ? `<div class="intent-info">
                 <h3>🤖 AI Intent Detection Results</h3>
                 <ul style="list-style: none; padding: 0;">
                   <li><strong>Detected Intent:</strong> ${
@@ -602,12 +635,18 @@ class EmailTemplateService {
                     intentResult.urgency || "Not specified"
                   }</li>
                 </ul>
-              </div>
+              </div>`
+                  : ""
+              }
 
               <div class="feedback-info">
-                <h3>💬 Client Feedback Summary</h3>
+                <h3>💬 ${
+                  isUIRegeneration ? "Regeneration" : "Client"
+                } Feedback Summary</h3>
                 <p><strong>Summary:</strong> ${
-                  intentResult.summary || "No summary available"
+                  intentResult.summary ||
+                  feedbackContext.feedback ||
+                  "No summary available"
                 }</p>
                 
                 ${
@@ -672,10 +711,18 @@ class EmailTemplateService {
             </div>
             
             <div class="footer">
-              <p><small>This document was regenerated by Levitate Studios AI Agent based on client feedback analysis.</small></p>
-              <p><small>The AI detected client intent with ${Math.round(
-                (intentResult.confidence || 0) * 100
-              )}% confidence and implemented the requested changes.</small></p>
+              <p><small>This document was regenerated by Levitate Studios AI Agent${
+                isUIRegeneration
+                  ? " based on manual regeneration request from the UI"
+                  : " based on client email feedback analysis"
+              }.</small></p>
+              ${
+                !isUIRegeneration
+                  ? `<p><small>The AI detected client intent with ${Math.round(
+                      (intentResult.confidence || 0) * 100
+                    )}% confidence and implemented the requested changes.</small></p>`
+                  : ""
+              }
             </div>
           </div>
         </body>
@@ -727,7 +774,10 @@ class EmailTemplateService {
    */
   static generateQuoteNotificationTemplate(project, details = {}) {
     try {
-      const subject = `Quote Document Ready - Select & Send to Client: ${project.name}`;
+      const isUIRegeneration = details?.isUIRegeneration || false;
+      const subject = `Quote Document Ready${
+        isUIRegeneration ? " (Regenerated)" : ""
+      } - Select & Send to Client: ${project.name}`;
       const driveFiles = Array.isArray(details.driveFiles)
         ? details.driveFiles.filter((file) => !!file)
         : [];
@@ -830,8 +880,14 @@ class EmailTemplateService {
         <body>
           <div class="container">
             <div class="header">
-              <h2>💼 Quote Package Ready</h2>
-              <p>Ready to send to client</p>
+              <h2>💼 Quote Package Ready${
+                isUIRegeneration ? " (Regenerated)" : ""
+              }</h2>
+              <p>${
+                isUIRegeneration
+                  ? "Quote has been manually regenerated from the UI"
+                  : "Ready to send to client"
+              }</p>
             </div>
             
             <div class="content">
@@ -928,7 +984,6 @@ class EmailTemplateService {
    */
   static generateQuoteUpdateNotificationTemplate(project, details = {}) {
     try {
-      const subject = `Quote Updated Based on Client Feedback: ${project.name}`;
       const {
         quoteId,
         previousQuoteId,
@@ -937,7 +992,11 @@ class EmailTemplateService {
         feedbackSummary,
         requestedChanges = [],
         sendToClientToken,
+        isUIRegeneration = false,
       } = details;
+      const subject = `Quote Updated${
+        isUIRegeneration ? " (Manual Request)" : " Based on Client Feedback"
+      }: ${project.name}`;
 
       const changesList =
         requestedChanges.length > 0
@@ -960,7 +1019,9 @@ class EmailTemplateService {
         : "";
 
       const htmlContent = `
-        <h2>Quote Updated Based on Client Feedback</h2>
+        <h2>Quote Updated${
+          isUIRegeneration ? " (Manual Request)" : " Based on Client Feedback"
+        }</h2>
         
         <h3>Project Details</h3>
         <ul>
@@ -976,10 +1037,14 @@ class EmailTemplateService {
 
         ${amendedNotice}
 
-        <h3>Client Feedback Summary</h3>
+        <h3>${
+          isUIRegeneration ? "Regeneration" : "Client"
+        } Feedback Summary</h3>
         <p>${
           feedbackSummary ||
-          "Client provided feedback requesting changes to the quote."
+          (isUIRegeneration
+            ? "Manual regeneration request with provided feedback."
+            : "Client provided feedback requesting changes to the quote.")
         }</p>
 
         <h3>Requested Changes</h3>
@@ -988,7 +1053,11 @@ class EmailTemplateService {
         </ul>
 
         <h3>Updated Quote</h3>
-        <p>The quote has been automatically updated based on the client's feedback. Please review the updated quote and send it to the client if approved.</p>
+        <p>${
+          isUIRegeneration
+            ? "The quote has been manually regenerated from the UI based on provided feedback. Please review the updated quote and send it to the client if approved."
+            : "The quote has been automatically updated based on the client's email feedback. Please review the updated quote and send it to the client if approved."
+        }</p>
 
         <div style="margin: 20px 0; padding: 16px; background: #e3f2fd; border-left: 4px solid #0f62fe; border-radius: 4px;">
           <div style="margin-bottom: 12px;">

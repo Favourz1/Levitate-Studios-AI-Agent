@@ -570,11 +570,13 @@ const workplanGenerationProcessor = async (job) => {
     });
 
     // Create Asana task for Creative Director
+    const isUIRegeneration = job.data?.isUIRegeneration || false;
     await createWorkplanReviewTask(
       project,
       googleDocUrl,
       slides.length,
-      correlationId
+      correlationId,
+      isUIRegeneration
     );
 
     // Send completion emails
@@ -584,7 +586,8 @@ const workplanGenerationProcessor = async (job) => {
       correlationId,
       googleDocUrl,
       slides.length,
-      buildResult.driveFileId
+      buildResult.driveFileId,
+      isUIRegeneration
     );
 
     const duration = Date.now() - startTime;
@@ -982,12 +985,14 @@ async function slideRegenerationProcessor(job) {
 
 /**
  * Create a workplan review task in Asana for the Creative Director
+ * @param {boolean} isUIRegeneration - Whether this is a UI regeneration (vs email intent)
  */
 async function createWorkplanReviewTask(
   project,
   googleDocUrl,
   slideCount,
-  correlationId
+  correlationId,
+  isUIRegeneration = false
 ) {
   try {
     if (!project.asanaProjectGid) {
@@ -1008,15 +1013,24 @@ async function createWorkplanReviewTask(
     const creativeDirector = await getCreativeDirector(project.id);
     const dueOn = addBusinessDays(new Date(), 3);
 
+    const taskTitle = isUIRegeneration
+      ? "Review Workplan Document (Regenerated)"
+      : "Review Workplan Document";
+    const taskDescription = isUIRegeneration
+      ? `Workplan manually regenerated from the UI with ${slideCount} slides.
+      \n
+      Link: ${googleDocUrl}`
+      : `Workplan generated with ${slideCount} slides.
+      \n
+      Link: ${googleDocUrl}`;
+
     const task = await asanaIntegration.createTask(
-      "Review Workplan Document",
+      taskTitle,
       project.asanaProjectGid,
       toDoSectionGid,
       creativeDirector?.asanaUserGid || null,
       dueOn,
-      `Workplan generated with ${slideCount} slides.
-      \n
-      Link: ${googleDocUrl}`
+      taskDescription
     );
 
     await prisma.auditLog.create({
@@ -1049,6 +1063,7 @@ async function createWorkplanReviewTask(
  * @param {string} googleDocUrl - Google Doc URL
  * @param {number} slideCount - Number of slides
  * @param {string} driveFileId - Google Drive file ID for sharing
+ * @param {boolean} isUIRegeneration - Whether this is a UI regeneration (vs email intent)
  */
 async function sendCompletionEmail(
   projectId,
@@ -1056,7 +1071,8 @@ async function sendCompletionEmail(
   correlationId,
   googleDocUrl,
   slideCount,
-  driveFileId
+  driveFileId,
+  isUIRegeneration = false
 ) {
   try {
     logger.info(
@@ -1348,7 +1364,8 @@ async function sendCompletionEmail(
             project,
             asanaProjectUrl,
             projectDocuments,
-            true // includeFinancials = true
+            true, // includeFinancials = true
+            isUIRegeneration
           );
 
         await brevoIntegration.sendTransactionalEmail({
@@ -1388,7 +1405,8 @@ async function sendCompletionEmail(
             project,
             asanaProjectUrl,
             projectDocuments,
-            false // includeFinancials = false
+            false, // includeFinancials = false
+            isUIRegeneration
           );
 
         await brevoIntegration.sendTransactionalEmail({
@@ -1429,7 +1447,8 @@ async function sendCompletionEmail(
             EmailTemplateService.generateWorkplanCompletionTemplate(
               project,
               googleDocUrl,
-              slideCount ?? projectDocuments.length ?? 0
+              slideCount ?? projectDocuments.length ?? 0,
+              isUIRegeneration
             );
 
           await brevoIntegration.sendTransactionalEmail({

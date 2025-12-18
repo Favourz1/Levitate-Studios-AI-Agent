@@ -1664,19 +1664,25 @@ async function updateAsanaWorkflow(
 
     // Add comment with PM mention and document links
     // Prepare the comment content with both text and HTML versions
+    // Different wording for UI regeneration vs email intent regeneration
+    const isUIRegeneration = feedbackContext?.isUIRegeneration || false;
     const commentContent = feedbackContext?.isRegeneration
       ? `<body>
-🔄 <strong>Brand Origin Document Regenerated</strong>
+🔄 <strong>Brand Origin Document Regenerated${
+          isUIRegeneration ? " (Manual Request)" : " (Client Email)"
+        }</strong>
 
-The AI agent has successfully regenerated the brand origin document for <strong>${
-          context.project.client.name
-        }</strong> based on client feedback.
+${
+  isUIRegeneration
+    ? `The brand origin document for <strong>${context.project.client.name}</strong> has been manually regenerated from the UI based on provided feedback.`
+    : `The AI agent has successfully regenerated the brand origin document for <strong>${context.project.client.name}</strong> based on client email feedback.`
+}
 
 📄 <strong>Updated Document:</strong> <a href="${
           documentResult.webViewLink
         }">View Regenerated Brand Origin Document</a>
 
-<strong>Client Feedback Summary:</strong>
+<strong>Feedback Summary:</strong>
 ${
   feedbackContext.intentResult?.summary ||
   feedbackContext.feedback ||

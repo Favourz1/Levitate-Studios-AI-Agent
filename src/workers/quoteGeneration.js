@@ -249,13 +249,16 @@ const quoteGenerationProcessorImpl = async (job) => {
     );
 
     // Step 6: Update Pending Projects board task and leave comment
+    const isUIRegeneration =
+      job.data?.feedbackContext?.isUIRegeneration || false;
     await updateAsanaTaskForQuote(
       projectId,
       driveFileEntries,
       financeUser,
       context.project.client,
       mainQuoteId,
-      correlationId
+      correlationId,
+      isUIRegeneration
     );
 
     // Step 7: Notify Finance/Admin via email
@@ -269,7 +272,8 @@ const quoteGenerationProcessorImpl = async (job) => {
       },
       financeUser,
       correlationId,
-      documentResult.documentId
+      documentResult.documentId,
+      isUIRegeneration
     );
 
     const duration = Date.now() - startTime;
@@ -528,6 +532,7 @@ async function shareQuoteDocumentsWithFinance(
 
 /**
  * Move Asana task to Quote phase and add comment
+ * @param {boolean} isUIRegeneration - Whether this is a UI regeneration (vs email intent)
  */
 async function updateAsanaTaskForQuote(
   projectId,
@@ -535,7 +540,8 @@ async function updateAsanaTaskForQuote(
   financeUser,
   client,
   mainQuoteId,
-  correlationId
+  correlationId,
+  isUIRegeneration = false
 ) {
   const moveResult = await AsanaPendingProjectsService.moveTaskToSection(
     projectId,
@@ -566,8 +572,14 @@ async function updateAsanaTaskForQuote(
       : "Finance Manager";
 
   const commentHtml = `<body>
-💼 <strong>Quote Document Ready for ${client?.name || "client"}</strong>
-The AI agent generated the primary quote and variants. Review the PDFs below to select the best option for the client.
+💼 <strong>Quote Document Ready for ${client?.name || "client"}${
+    isUIRegeneration ? " (Regenerated)" : ""
+  }</strong>
+${
+  isUIRegeneration
+    ? "The quote document has been manually regenerated from the UI. Review the PDFs below to select the best option for the client."
+    : "The AI agent generated the primary quote and variants. Review the PDFs below to select the best option for the client."
+}
 
 ${financeMention} please check your email to review and send the selected quote to the client.
 </body>`;
@@ -589,6 +601,7 @@ ${financeMention} please check your email to review and send the selected quote 
 
 /**
  * Send notification email to Finance/Admin with Send to Client buttons
+ * @param {boolean} isUIRegeneration - Whether this is a UI regeneration (vs email intent)
  */
 async function sendQuoteNotifications(
   project,
@@ -596,7 +609,8 @@ async function sendQuoteNotifications(
   quoteSummary,
   financeUser,
   correlationId,
-  documentId
+  documentId,
+  isUIRegeneration = false
 ) {
   const recipients = new Set();
   let financeUserId = null;
@@ -745,6 +759,7 @@ async function sendQuoteNotifications(
       driveFiles,
       totalItems: quoteSummary.totalItems,
       sendToClientTokens,
+      isUIRegeneration,
     }
   );
 
@@ -1347,6 +1362,7 @@ const updateQuoteProcessor = async (job) => {
                 "Client feedback provided",
               requestedChanges: finalIntentResult?.requestedChanges || [],
               sendToClientToken,
+              isUIRegeneration: feedbackContext?.isUIRegeneration || false,
             }
           );
 
@@ -1403,11 +1419,20 @@ const updateQuoteProcessor = async (job) => {
             ? `<a data-asana-gid="${financeUser.asanaUserGid}" data-asana-type="user">@${financeUser.name}</a>`
             : "Finance Manager";
 
+        const isUIRegeneration = feedbackContext?.isUIRegeneration || false;
         const commentHtml = `<body>
-💼 <strong>Quote Updated Based on Client Feedback</strong>
-The quote has been updated based on client feedback. ${
-          finalIntentResult?.requestedChanges?.length || 0
-        } changes were requested.
+💼 <strong>Quote Updated${
+          isUIRegeneration ? " (Manual Request)" : " Based on Client Feedback"
+        }</strong>
+${
+  isUIRegeneration
+    ? `The quote has been manually updated from the UI based on provided feedback. ${
+        finalIntentResult?.requestedChanges?.length || 0
+      } changes were requested.`
+    : `The quote has been updated based on client email feedback. ${
+        finalIntentResult?.requestedChanges?.length || 0
+      } changes were requested.`
+}
 
 ${financeMention} please review the updated quote via email sent to you and send to client if approved.
 </body>`;
