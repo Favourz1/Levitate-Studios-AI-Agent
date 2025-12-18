@@ -248,6 +248,7 @@ module.exports = {
   getRolePermissions,
   hasPermission,
   requirePermission,
+  loadRoleOverrides,
   invalidateRoleOverridesCache,
   DEFAULT_ROLE_PERMISSIONS,
 };

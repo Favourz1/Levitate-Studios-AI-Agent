@@ -12,6 +12,7 @@ const crypto = require("crypto");
 const { appConfig } = require("@/config");
 const { TeamRole } = require("@/constants");
 const { brevoIntegration } = require("@/integrations");
+const { requireAuthForUI } = require("@/middleware/auth");
 
 const prisma = getPrismaClient();
 
@@ -284,6 +285,54 @@ router.post(
         },
       },
       "Login successful",
+      StatusCodes.OK
+    );
+  })
+);
+
+/**
+ * GET /api/v1/ui/auth/me
+ * Get current authenticated user with permission overrides for all roles
+ */
+router.get(
+  "/me",
+  requireAuthForUI,
+  asyncHandler(async (req, res) => {
+    const user = req.user; // Set by requireAuthForUI middleware
+
+    // Load role overrides from database
+    const { loadRoleOverrides } = require("@/utils/permissions");
+    const roleOverrides = await loadRoleOverrides();
+
+    // Parse roles from JSON field
+    const userRoles = Array.isArray(user.roles)
+      ? user.roles.map((r) => (typeof r === "object" ? r.role : r))
+      : [];
+
+    // Get permissions for each role the user has (with overrides)
+    const { getRolePermissions } = require("@/utils/permissions");
+    const rolePermissions = {};
+    userRoles.forEach((role) => {
+      rolePermissions[role] = getRolePermissions(role, roleOverrides);
+    });
+
+    // Return user data with permission overrides
+    return sendSuccessResponse(
+      res,
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          asanaUserGid: user.asanaUserGid,
+          roles: user.roles, // Return JSON field as-is
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+        },
+        rolePermissions, // Permissions for each role with overrides applied
+        roleOverrides, // All role overrides (for frontend to use)
+      },
+      "Current user retrieved successfully",
       StatusCodes.OK
     );
   })
