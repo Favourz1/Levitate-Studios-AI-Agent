@@ -15,6 +15,7 @@ const {
   DocumentType,
   DocumentStatus,
   AuditActions,
+  ProjectPhaseOrder,
 } = require("@/constants");
 const { appConfig } = require("@/config");
 
@@ -304,17 +305,9 @@ router.post(
       }
     }
 
-    // Determine next phase using phase order
-    const phaseOrder = [
-      ProjectPhase.QUESTIONNAIRE,
-      ProjectPhase.BRAND_ORIGIN,
-      ProjectPhase.QUOTE_DOCUMENT,
-      ProjectPhase.ASANA_INIT,
-      ProjectPhase.WORKPLAN_GENERATION,
-      ProjectPhase.FINALIZED,
-    ];
-    const currentIndex = phaseOrder.indexOf(project.phase);
-    const nextPhase = phaseOrder[currentIndex + 1] || project.phase;
+    // Determine next phase using project phase order
+    const currentIndex = ProjectPhaseOrder.indexOf(project.phase);
+    const nextPhase = ProjectPhaseOrder[currentIndex + 1] || project.phase;
 
     // Update project phase
     const updatedProject = await prisma.project.update({

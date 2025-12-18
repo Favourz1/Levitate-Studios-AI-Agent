@@ -9,6 +9,15 @@ const ProjectPhase = {
   REJECTED: "REJECTED",
 };
 
+const ProjectPhaseOrder = [
+  ProjectPhase.QUESTIONNAIRE,
+  ProjectPhase.BRAND_ORIGIN,
+  ProjectPhase.QUOTE_DOCUMENT,
+  ProjectPhase.ASANA_INIT,
+  ProjectPhase.WORKPLAN_GENERATION,
+  ProjectPhase.FINALIZED,
+];
+
 const DocumentType = {
   BRAND_ORIGIN: "BRAND_ORIGIN",
   QUOTE: "QUOTE",
@@ -344,6 +353,7 @@ const WorkplanServiceTypeFallback = {
 
 module.exports = {
   ProjectPhase,
+  ProjectPhaseOrder,
   DocumentType,
   DocumentStatus,
   WorkplanServiceType,
