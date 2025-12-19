@@ -157,6 +157,7 @@ function formatWorkplanFeedback(intentResult, rawFeedback) {
   return formatted;
 }
 
+// Note: For every initial creation or regenration, it creates a new Google Doc each time (not updating the existing one). The database reference is updated to the new document, so the old document remains in Google Drive but is no longer referenced.
 /**
  * Workplan Generation Processor
  * Orchestrates multi-agent pipeline (Planner → Researcher → Strategist → Art Director → Document Builder)

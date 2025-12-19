@@ -870,7 +870,9 @@ class AsanaIntegration {
         async () => {
           return this.handleRateLimit(async () => {
             const workspaceGid = appConfig.asana.workspaceGid;
-            const opts = {};
+            const opts = {
+              opt_fields: "gid,name,email",
+            };
             const response = await this.usersApi.getUsersForWorkspace(
               workspaceGid,
               opts

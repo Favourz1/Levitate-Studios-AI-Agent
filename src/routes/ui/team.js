@@ -11,6 +11,7 @@ const { requireAuthForUI } = require("../../middleware/auth");
 const { requirePermission } = require("../../utils/permissions");
 const { TeamRole, AuditActions, CriticalTeamRoles } = require("@/constants");
 const bcrypt = require("bcrypt");
+const { getAsanaIntegration } = require("@/integrations/asana");
 
 const prisma = getPrismaClient();
 
@@ -52,22 +53,51 @@ router.post(
   requireAuthForUI,
   requirePermission("team", "manage"),
   asyncHandler(async (req, res) => {
-    const { name, email, asanaUserGid, roles } = req.body;
+    const { name, email, roles } = req.body;
     const userId = req.user.id;
     const actingRole = req.actingRole;
 
     if (
       !name ||
       !email ||
-      !asanaUserGid ||
       !roles ||
       !Array.isArray(roles) ||
       roles.length === 0
     ) {
       return sendErrorResponse(
         res,
-        "Name, email, Asana User GID, and at least one role are required",
+        "Name, email, and at least one role are required",
         StatusCodes.BAD_REQUEST
+      );
+    }
+
+    // Look up user in Asana workspace by email
+    let asanaUserGid = null;
+    try {
+      const asanaIntegration = getAsanaIntegration();
+      const workspaceUsers = await asanaIntegration.getWorkspaceUsers();
+
+      // Find user by email (case-insensitive comparison)
+      const emailLower = email.toLowerCase().trim();
+      const asanaUser = workspaceUsers.find(
+        (user) => user.email && user.email.toLowerCase().trim() === emailLower
+      );
+
+      if (!asanaUser || !asanaUser.gid) {
+        return sendErrorResponse(
+          res,
+          `User with email ${email} not found in Asana workspace. Please add this user to Asana before adding them as a team member.`,
+          StatusCodes.BAD_REQUEST
+        );
+      }
+
+      asanaUserGid = asanaUser.gid;
+    } catch (error) {
+      // If Asana API call fails, return error
+      return sendErrorResponse(
+        res,
+        `Failed to verify user in Asana workspace: ${error.message}. Please ensure the user exists in Asana before adding them as a team member.`,
+        StatusCodes.INTERNAL_SERVER_ERROR
       );
     }
 
@@ -324,8 +354,8 @@ router.patch(
     const updateData = {};
     if (name) updateData.name = name;
     if (email) updateData.email = email.toLowerCase();
-    if (asanaUserGid !== undefined && typeof asanaUserGid === "string")
-      updateData.asanaUserGid = asanaUserGid;
+    // if (asanaUserGid !== undefined && typeof asanaUserGid === "string")
+    //   updateData.asanaUserGid = asanaUserGid;
 
     // Update roles if provided - roles is JSON field
     if (roles && Array.isArray(roles)) {
