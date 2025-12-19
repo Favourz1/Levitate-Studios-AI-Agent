@@ -8,15 +8,111 @@ const {
 const { StatusCodes } = require("http-status-codes");
 const { getPrismaClient } = require("@/database");
 const { requireAuthForUI } = require("@/middleware/auth");
-const { requirePermission } = require("@/utils/permissions");
+const { requirePermission, hasPermission } = require("@/utils/permissions");
 const { DocumentSendingService } = require("@/services/documentSendingService");
 const { QueueService, queues, QUEUE_NAMES } = require("@/queues");
 const { createLogger } = require("@/utils/logger");
 const { DocumentType, DocumentStatus, AuditActions } = require("@/constants");
 const { generateUuid } = require("@/utils");
+const { divideAndRoundUp } = require("@/utils/pagination");
+const { loadRoleOverrides } = require("@/utils/permissions");
 
 const prisma = getPrismaClient();
 const logger = createLogger("route:documents");
+
+/**
+ * GET /api/v1/ui/documents
+ * List documents with optional filters (type, status, search) and pagination
+ * Permission rules:
+ *  - type=QUOTE or QUOTE_VARIANT: requires quotes.view
+ *  - type=WORKPLAN: requires workplans.view
+ *  - otherwise: requires documents.view
+ */
+router.get(
+  "/",
+  requireAuthForUI,
+  asyncHandler(async (req, res) => {
+    const { page = 1, limit = 20, type, status, search } = req.query;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const offset = (pageNum - 1) * limitNum;
+
+    // Determine required permission based on type filter
+    const actingRole = req.actingRole;
+    const roleOverrides = await loadRoleOverrides();
+    let permissionCategory = "documents";
+
+    if (type === DocumentType.QUOTE || type === DocumentType.QUOTE_VARIANT) {
+      permissionCategory = "quotes";
+    } else if (type === DocumentType.WORKPLAN) {
+      permissionCategory = "workplans";
+    }
+
+    if (!hasPermission(actingRole, permissionCategory, "view", roleOverrides)) {
+      return sendErrorResponse(
+        res,
+        `Permission denied: ${permissionCategory}.view`,
+        StatusCodes.FORBIDDEN
+      );
+    }
+
+    // Build WHERE clause
+    const where = {
+      ...(type && { type }),
+      ...(status && { status }),
+      ...(search && {
+        OR: [
+          { erpQuoteId: { contains: search, mode: "insensitive" } },
+          {
+            project: {
+              name: { contains: search, mode: "insensitive" },
+            },
+          },
+          { metadataInfo: { path: ["title"], string_contains: search } },
+        ],
+      }),
+    };
+
+    const total = await prisma.document.count({ where });
+
+    const documents = await prisma.document.findMany({
+      where,
+      include: {
+        project: {
+          include: {
+            client: true,
+          },
+        },
+        workplanSlides:
+          type === DocumentType.WORKPLAN
+            ? {
+                orderBy: { slideNumber: "asc" },
+              }
+            : false,
+      },
+      orderBy: { updatedAt: "desc" },
+      skip: offset,
+      take: limitNum,
+    });
+
+    const totalPages = divideAndRoundUp(total, limitNum);
+
+    return sendSuccessResponse(
+      res,
+      {
+        documents,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages,
+        },
+      },
+      "Documents fetched successfully",
+      StatusCodes.OK
+    );
+  })
+);
 
 /**
  * GET /api/v1/ui/documents/:id
