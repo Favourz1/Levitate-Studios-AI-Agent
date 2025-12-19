@@ -154,6 +154,7 @@ ${
 }
 
 ### Rate Card
+**Note:** All prices are specified in Nigerian Naira (₦).
 ${this.formatRateCardForPrompt(rateCard)}
 
 ## Your Task: Generate Quote Items
@@ -199,7 +200,7 @@ Generate a JSON array of quote items following this exact structure:
   {
     "item_code": "BRAND_LOGO",
     "qty": 1,
-    "rate": 2000000,
+    "rate": 1500000,
     "description": "Brand Logo Design - Complete logo design including primary and secondary variations"
   },
   {
@@ -371,6 +372,7 @@ ${JSON.stringify(quoteItems, null, 2)}
 ${this.formatQuestionnaireForPrompt(context.questionnaire?.raw || {})}
 
 ## Rate Card Reference
+**Note:** All prices are specified in Nigerian Naira (₦).
 ${this.formatRateCardForPrompt(context.rateCard || {})}
 
 ## Validation Criteria
@@ -471,6 +473,7 @@ ${JSON.stringify(baseQuote, null, 2)}
 ${this.formatQuestionnaireForPrompt(context.questionnaire?.raw || {})}
 
 ## Rate Card Reference
+**Note:** All prices are specified in Nigerian Naira (₦).
 ${this.formatRateCardForPrompt(context.rateCard || {})}
 
 ## Your Task: Generate Variant Quote
@@ -493,7 +496,7 @@ Generate a JSON array of quote items following the same structure as base quote,
   {
     "item_code": "BRAND_LOGO",
     "qty": 1,
-    "rate": 2200000,
+    "rate": 1500000,
     "description": "Brand Logo Design - Premium package with extended variations and brand guidelines"
   }
 ]
@@ -670,6 +673,7 @@ ${
 ${this.formatQuestionnaireForPrompt(context.questionnaire?.raw || {})}
 
 ## Rate Card Reference
+**Note:** All prices are specified in Nigerian Naira (₦).
 ${this.formatRateCardForPrompt(context.rateCard || {})}
 
 ## Your Task: Update Quote Items
@@ -723,7 +727,7 @@ Generate a JSON array of **ALL** quote items (modified, added, and unchanged) fo
   {
     "item_code": "NEW_SERVICE",
     "qty": 2,
-    "rate": 1500000,
+    "rate": 150000,
     "description": "New service requested by client"
   }
 ]
