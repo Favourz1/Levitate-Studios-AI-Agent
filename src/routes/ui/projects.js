@@ -118,31 +118,10 @@ router.get(
       where: { id: parseInt(id, 10) },
       include: {
         client: true,
-        documents: {
-          include: {
-            revisions: {
-              orderBy: { createdAt: "desc" },
-            },
-            workplanSlides: {
-              orderBy: { slideNumber: "asc" },
-            },
-          },
-        },
-        emailThreads: {
-          include: {
-            emails: {
-              orderBy: { receivedAt: "desc" },
-            },
-          },
-        },
         asanaLinks: {
           include: {
             tasks: true,
           },
-        },
-        auditLogs: {
-          orderBy: { at: "desc" },
-          take: 50,
         },
       },
     });
