@@ -22,7 +22,7 @@ const logger = createLogger("route:documents");
 
 /**
  * GET /api/v1/ui/documents
- * List documents with optional filters (type, status, search) and pagination
+ * List documents with optional filters (type, status, search, projectId) and pagination
  * Permission rules:
  *  - type=QUOTE or QUOTE_VARIANT: requires quotes.view
  *  - type=WORKPLAN: requires workplans.view
@@ -32,34 +32,58 @@ router.get(
   "/",
   requireAuthForUI,
   asyncHandler(async (req, res) => {
-    const { page = 1, limit = 20, type, status, search } = req.query;
+    const { page = 1, limit = 20, type, status, search, projectId } = req.query;
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const offset = (pageNum - 1) * limitNum;
 
-    // Determine required permission based on type filter
     const actingRole = req.actingRole;
     const roleOverrides = await loadRoleOverrides();
-    let permissionCategory = "documents";
 
-    if (type === DocumentType.QUOTE || type === DocumentType.QUOTE_VARIANT) {
-      permissionCategory = "quotes";
-    } else if (type === DocumentType.WORKPLAN) {
-      permissionCategory = "workplans";
+    // Check permissions for different document categories
+    const canViewQuotes = hasPermission(
+      actingRole,
+      "quotes",
+      "view",
+      roleOverrides
+    );
+    const canViewWorkplans = hasPermission(
+      actingRole,
+      "workplans",
+      "view",
+      roleOverrides
+    );
+    const canViewOtherDocs = hasPermission(
+      actingRole,
+      "documents",
+      "view",
+      roleOverrides
+    );
+
+    // When type filter is specified, enforce strict permission check (V1 behavior)
+    if (type) {
+      let permissionCategory = "documents";
+      if (type === DocumentType.QUOTE || type === DocumentType.QUOTE_VARIANT) {
+        permissionCategory = "quotes";
+      } else if (type === DocumentType.WORKPLAN) {
+        permissionCategory = "workplans";
+      }
+
+      if (
+        !hasPermission(actingRole, permissionCategory, "view", roleOverrides)
+      ) {
+        return sendErrorResponse(
+          res,
+          `Permission denied: ${permissionCategory}.view`,
+          StatusCodes.FORBIDDEN
+        );
+      }
     }
 
-    if (!hasPermission(actingRole, permissionCategory, "view", roleOverrides)) {
-      return sendErrorResponse(
-        res,
-        `Permission denied: ${permissionCategory}.view`,
-        StatusCodes.FORBIDDEN
-      );
-    }
-
-    // Build WHERE clause
+    // Build base WHERE clause
     const where = {
-      ...(type && { type }),
       ...(status && { status }),
+      ...(projectId && { projectId: parseInt(projectId, 10) }),
       ...(search && {
         OR: [
           { erpQuoteId: { contains: search, mode: "insensitive" } },
@@ -73,6 +97,80 @@ router.get(
       }),
     };
 
+    // Add type filtering based on permissions
+    // This is the KEY optimization: filter at DB level, not in memory
+    if (type) {
+      // Explicit type filter - already permission-checked above
+      where.type = type;
+    } else if (projectId) {
+      // ProjectId without type filter: build type restrictions based on permissions
+      const allowedTypes = [];
+
+      if (canViewQuotes) {
+        allowedTypes.push(DocumentType.QUOTE, DocumentType.QUOTE_VARIANT);
+      }
+      if (canViewWorkplans) {
+        allowedTypes.push(DocumentType.WORKPLAN);
+      }
+      if (canViewOtherDocs) {
+        // Add all other document types
+        // Assuming you have a list of all document types
+        const restrictedTypes = [
+          DocumentType.QUOTE,
+          DocumentType.QUOTE_VARIANT,
+          DocumentType.WORKPLAN,
+        ];
+        const otherTypes = Object.values(DocumentType).filter(
+          (t) => !restrictedTypes.includes(t)
+        );
+        allowedTypes.push(...otherTypes);
+      }
+
+      if (allowedTypes.length === 0) {
+        // User has no permissions for any document type
+        return sendErrorResponse(
+          res,
+          "Permission denied: No document view permissions",
+          StatusCodes.FORBIDDEN
+        );
+      }
+
+      // Filter by allowed types at DB level
+      where.type = { in: allowedTypes };
+    } else {
+      // No projectId, no type: need to filter by permissions globally
+      const allowedTypes = [];
+
+      if (canViewQuotes) {
+        allowedTypes.push(DocumentType.QUOTE, DocumentType.QUOTE_VARIANT);
+      }
+      if (canViewWorkplans) {
+        allowedTypes.push(DocumentType.WORKPLAN);
+      }
+      if (canViewOtherDocs) {
+        const restrictedTypes = [
+          DocumentType.QUOTE,
+          DocumentType.QUOTE_VARIANT,
+          DocumentType.WORKPLAN,
+        ];
+        const otherTypes = Object.values(DocumentType).filter(
+          (t) => !restrictedTypes.includes(t)
+        );
+        allowedTypes.push(...otherTypes);
+      }
+
+      if (allowedTypes.length === 0) {
+        return sendErrorResponse(
+          res,
+          "Permission denied: No document view permissions",
+          StatusCodes.FORBIDDEN
+        );
+      }
+
+      where.type = { in: allowedTypes };
+    }
+
+    // Now execute query with all filters applied at DB level
     const total = await prisma.document.count({ where });
 
     const documents = await prisma.document.findMany({
@@ -83,12 +181,12 @@ router.get(
             client: true,
           },
         },
-        workplanSlides:
-          type === DocumentType.WORKPLAN
-            ? {
-                orderBy: { slideNumber: "asc" },
-              }
-            : false,
+        revisions: {
+          orderBy: { createdAt: "desc" },
+        },
+        workplanSlides: {
+          orderBy: { slideNumber: "asc" },
+        },
       },
       orderBy: { updatedAt: "desc" },
       skip: offset,
