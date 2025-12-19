@@ -35,7 +35,8 @@ router.post(
     try {
       // Process form submission using orchestrator
       // Note: for API calls, we can choose to wait for async processing or skip it
-      const skipAsyncProcessing = req.query.skipAsync === "true";
+      // const skipAsyncProcessing = req.query.skipAsync === "true";
+      const skipAsyncProcessing = false;
 
       const result = await FormSubmissionService.processAPISubmission(
         req.body,

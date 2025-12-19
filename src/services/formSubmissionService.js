@@ -652,16 +652,19 @@ class FormSubmissionService {
 
       // Step 5: Handle async processing if not skipped
       if (!skipAsyncProcessing) {
+        setImmediate(() =>
+          this.handleAsyncProcessing(processedData, correlationId)
+        );
         // Use setImmediate for webhook requests to not block response
         // Use await for API requests to ensure completion
-        if (requestData.isWebhook) {
-          setImmediate(() =>
-            this.handleAsyncProcessing(processedData, correlationId)
-          );
-        } else {
-          await this.handleAsyncProcessing(processedData, correlationId);
-          result.asyncProcessingCompleted = true;
-        }
+        // if (requestData.isWebhook) {
+        //   setImmediate(() =>
+        //     this.handleAsyncProcessing(processedData, correlationId)
+        //   );
+        // } else {
+        //   await this.handleAsyncProcessing(processedData, correlationId);
+        //   result.asyncProcessingCompleted = true;
+        // }
       }
 
       return result;
