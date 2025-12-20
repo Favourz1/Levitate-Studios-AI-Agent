@@ -1,3 +1,6 @@
+const { appConfig } = require("@/config");
+const isDev = appConfig.server.nodeEnv === "development";
+
 // Enums as constants for type safety and runtime validation
 const ProjectPhase = {
   QUESTIONNAIRE: "QUESTIONNAIRE",
@@ -225,7 +228,7 @@ const ProcessingStatus = {
 
 // System Project Names and Descriptions
 const SystemProjects = {
-  PENDING_PROJECTS_NAME: "Pending Projects",
+  PENDING_PROJECTS_NAME: isDev ? "Dev - Pending Projects" : "Pending Projects",
   PENDING_PROJECTS_DESCRIPTION:
     "AI Agent managed project for pending client submissions",
 };

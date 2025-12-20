@@ -2819,7 +2819,11 @@ class GoogleIntegration {
    * Uses global config to store folder ID for reuse
    */
   async ensureDocumentsFolder() {
-    const folderName = "Levitate Studios - AI Agent Generated Documents";
+    const { appConfig } = require("@/config");
+    const isDev = appConfig.server.nodeEnv === "development";
+    const folderName = isDev
+      ? "Dev - Levitate Studios - AI Agent Generated Documents"
+      : "Levitate Studios - AI Agent Generated Documents";
     const configKey = CONFIG_KEYS.GOOGLE_DOCUMENTS_FOLDER;
 
     try {
