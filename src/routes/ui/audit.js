@@ -7,6 +7,7 @@ const { getPrismaClient } = require("@/database");
 const { requireAuthForUI } = require("@/middleware/auth");
 const { requirePermission } = require("@/utils/permissions");
 const { divideAndRoundUp } = require("@/utils/pagination");
+const { Prisma } = require("@prisma/client");
 
 const prisma = getPrismaClient();
 
@@ -34,54 +35,129 @@ router.get(
     const limitNum = parseInt(limit, 10);
     const offset = (pageNum - 1) * limitNum;
 
-    // For actor, also check details?.name (stored in JSON in details column)
-    let actorFilter = undefined;
-    if (actor) {
-      actorFilter = {
-        OR: [
-          { actor: { contains: actor, mode: "insensitive" } },
-          // details.name string in Prisma JSON (Postgres) field
-          {
-            details: {
-              path: ["name"],
-              string_contains: actor,
-              mode: "insensitive",
+    let total, logs;
+
+    // If actor filter is needed, use raw SQL for case-insensitive JSON search
+    if (actor && actor.trim()) {
+      const actorLower = actor.trim().toLowerCase();
+      const actionLower = action ? action.toLowerCase() : null;
+
+      // Build WHERE conditions array
+      const conditions = [];
+
+      if (projectId) {
+        conditions.push(
+          Prisma.sql`al."project_id" = ${parseInt(projectId, 10)}`
+        );
+      }
+
+      // Case-insensitive actor search (both actor field and details.name JSON field)
+      conditions.push(
+        Prisma.sql`(
+          LOWER(al."actor") LIKE ${`%${actorLower}%`} OR
+          LOWER(CAST(al."details"->>'name' AS TEXT)) LIKE ${`%${actorLower}%`}
+        )`
+      );
+
+      if (actingRole) {
+        conditions.push(Prisma.sql`al."acting_role" = ${actingRole}`);
+      }
+
+      if (action) {
+        conditions.push(
+          Prisma.sql`LOWER(al."action") LIKE ${`%${actionLower}%`}`
+        );
+      }
+
+      if (startDate) {
+        conditions.push(Prisma.sql`al."at" >= ${new Date(startDate)}`);
+      }
+
+      if (endDate) {
+        conditions.push(Prisma.sql`al."at" <= ${new Date(endDate)}`);
+      }
+
+      // Count query
+      const countQuery = Prisma.sql`
+        SELECT COUNT(*)::int as count
+        FROM "audit_log" al
+        WHERE ${Prisma.join(conditions, Prisma.sql` AND `)}
+      `;
+
+      const countResult = await prisma.$queryRaw(countQuery);
+      total = countResult[0].count;
+
+      // FindMany query with project join
+      const findQuery = Prisma.sql`
+        SELECT 
+          al.id,
+          al.project_id as "projectId",
+          al.actor,
+          al.acting_role as "actingRole",
+          al.action,
+          al.details,
+          al.at,
+          p.id as "project_id",
+          p.name as "project_name",
+          p.phase as "project_phase"
+        FROM "audit_log" al
+        LEFT JOIN "projects" p ON al.project_id = p.id
+        WHERE ${Prisma.join(conditions, Prisma.sql` AND `)}
+        ORDER BY al."at" DESC
+        LIMIT ${limitNum} OFFSET ${offset}
+      `;
+
+      const rawLogs = await prisma.$queryRaw(findQuery);
+
+      // Transform results to match Prisma format
+      logs = rawLogs.map((log) => ({
+        id: log.id,
+        projectId: log.projectId,
+        actor: log.actor,
+        actingRole: log.actingRole,
+        action: log.action,
+        details: log.details,
+        at: log.at,
+        project: log.project_id
+          ? {
+              id: log.project_id,
+              name: log.project_name,
+              phase: log.project_phase,
+            }
+          : null,
+      }));
+    } else {
+      // No actor filter - use regular Prisma queries (more efficient)
+      const where = {
+        ...(projectId && { projectId: parseInt(projectId, 10) }),
+        ...(actingRole && { actingRole: { equals: actingRole } }),
+        ...(action && { action: { contains: action, mode: "insensitive" } }),
+        ...((startDate || endDate) && {
+          at: {
+            ...(startDate && { gte: new Date(startDate) }),
+            ...(endDate && { lte: new Date(endDate) }),
+          },
+        }),
+      };
+
+      total = await prisma.auditLog.count({ where });
+
+      logs = await prisma.auditLog.findMany({
+        where,
+        include: {
+          project: {
+            select: {
+              id: true,
+              name: true,
+              phase: true,
             },
           },
-        ],
-      };
+        },
+        orderBy: { at: "desc" },
+        skip: offset,
+        take: limitNum,
+      });
     }
-
-    const where = {
-      ...(projectId && { projectId: parseInt(projectId, 10) }),
-      ...(actorFilter && actorFilter),
-      ...(actingRole && { actingRole: { equals: actingRole } }),
-      ...(action && { action: { contains: action, mode: "insensitive" } }),
-      ...((startDate || endDate) && {
-        at: {
-          ...(startDate && { gte: new Date(startDate) }),
-          ...(endDate && { lte: new Date(endDate) }),
-        },
-      }),
-    };
-
-    const total = await prisma.auditLog.count({ where });
-
-    const logs = await prisma.auditLog.findMany({
-      where,
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            phase: true,
-          },
-        },
-      },
-      orderBy: { at: "desc" },
-      skip: offset,
-      take: limitNum,
-    });
 
     const totalPages = divideAndRoundUp(total, limitNum);
 
