@@ -35,6 +35,7 @@ const {
   SystemActors,
   AuditActions,
   SystemEmails,
+  ProjectPhase,
 } = require("@/constants");
 
 /**
@@ -1352,6 +1353,15 @@ async function createDocumentRecords(
 
     // Step 3: Quick database transaction to update with Google Drive info and create revision
     const finalResult = await withTransaction(async (tx) => {
+      // Get project to check current phase
+      const project = await tx.project.findUnique({
+        where: { id: projectId },
+      });
+
+      if (!project) {
+        throw new Error(`Project with ID ${projectId} not found`);
+      }
+
       // Update document with Google Drive ID and move to PM_REVIEW status
       const updatedDocument = await tx.document.update({
         where: { id: documentRecord.document.id },
@@ -1380,6 +1390,39 @@ async function createDocumentRecords(
         where: { id: documentRecord.document.id },
         data: { currentRevisionId: revision.id },
       });
+
+      // Update project phase to BRAND_ORIGIN if not already set
+      // This ensures the project phase reflects that brand origin document has been generated
+      if (project.phase !== ProjectPhase.BRAND_ORIGIN) {
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            phase: ProjectPhase.BRAND_ORIGIN,
+            updatedAt: new Date(),
+          },
+        });
+
+        await tx.projectPhaseLog.create({
+          data: {
+            projectId,
+            fromPhase: project.phase,
+            toPhase: ProjectPhase.BRAND_ORIGIN,
+            actor: SystemActors.BRAND_ORIGIN_GENERATOR,
+            reason: "Brand origin document generated",
+            at: new Date(),
+          },
+        });
+
+        logger.info(
+          {
+            projectId,
+            fromPhase: project.phase,
+            toPhase: ProjectPhase.BRAND_ORIGIN,
+            correlationId,
+          },
+          "Project phase updated to BRAND_ORIGIN after document generation"
+        );
+      }
 
       // Create audit log entry
       await tx.auditLog.create({
