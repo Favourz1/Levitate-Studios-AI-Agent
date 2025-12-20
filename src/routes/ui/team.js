@@ -353,7 +353,7 @@ router.patch(
     // Update basic fields
     const updateData = {};
     if (name) updateData.name = name;
-    if (email) updateData.email = email.toLowerCase();
+    // if (email) updateData.email = email.toLowerCase();
     // if (asanaUserGid !== undefined && typeof asanaUserGid === "string")
     //   updateData.asanaUserGid = asanaUserGid;
 
