@@ -31,6 +31,7 @@ class DocumentSendingService {
     userId,
     correlationId,
   }) {
+    let actorName = null; // will be used for audit log entry as per instruction
     try {
       // Validate inputs
       if (!documentId || typeof documentId !== "number") {
@@ -64,6 +65,29 @@ class DocumentSendingService {
         },
         "Starting document send to client workflow"
       );
+
+      // Try to fetch the user name (do this _before_ any transactions)
+      try {
+        // You could also use `prisma` directly if out-of-transaction, or use a transaction client if always in tx
+        // Here, since this is OUTSIDE TX, we use `prisma`
+        const teamMember = await prisma.teamMember.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        if (teamMember && teamMember.name) {
+          actorName = teamMember.name;
+        }
+      } catch (fetchNameError) {
+        // don't break execution, fallback to null/undefined
+        logger.warn(
+          {
+            userId,
+            error: fetchNameError.message,
+            correlationId,
+          },
+          "Failed to fetch team member name for audit log; will fallback to userId in audit log."
+        );
+      }
 
       // Execute the complete workflow in a transaction
       const result = await withTransaction(async (tx) => {
@@ -495,7 +519,10 @@ class DocumentSendingService {
         await tx.auditLog.create({
           data: {
             projectId,
-            actor: `USER (${userId})`,
+            actor:
+              actorName && typeof actorName === "string" && actorName.trim()
+                ? `USER (${actorName})`
+                : `USER (${userId})`, // fallback if we couldn't fetch
             action: "DOCUMENT_SENT_TO_CLIENT",
             details: {
               documentId,
