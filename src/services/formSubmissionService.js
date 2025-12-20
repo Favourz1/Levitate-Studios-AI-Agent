@@ -171,187 +171,193 @@ class FormSubmissionService {
    * @private
    */
   static async processFormData(parsedBody, correlationId) {
-    return await withTransaction(async (tx) => {
-      logger.info({
-        message: "Starting form data processing",
-        correlationId,
-        formId: parsedBody.metadata.formId,
-        responseId: parsedBody.responseId,
-      });
+    return await withTransaction(
+      async (tx) => {
+        logger.info({
+          message: "Starting form data processing",
+          correlationId,
+          formId: parsedBody.metadata.formId,
+          responseId: parsedBody.responseId,
+        });
 
-      // Step 1: Extract and validate client information
-      const clientInfo = this.extractClientInfo(parsedBody);
-      logger.debug({ clientInfo, correlationId }, "Extracted client info");
+        // Step 1: Extract and validate client information
+        const clientInfo = this.extractClientInfo(parsedBody);
+        logger.debug({ clientInfo, correlationId }, "Extracted client info");
 
-      // Step 2: Create or get existing client
-      let client = await tx.client.findFirst({
-        where: { primaryEmail: clientInfo.primaryEmail },
-      });
+        // Step 2: Create or get existing client
+        let client = await tx.client.findFirst({
+          where: { primaryEmail: clientInfo.primaryEmail },
+        });
 
-      if (client) {
-        // Update existing client context if needed
-        logger.info(
-          {
-            clientId: client.id,
-            correlationId,
-          },
-          "Found existing client"
-        );
+        if (client) {
+          // Update existing client context if needed
+          logger.info(
+            {
+              clientId: client.id,
+              correlationId,
+            },
+            "Found existing client"
+          );
 
-        // Optionally update the client name if it's different and not empty
-        if (clientInfo.name && client.name !== clientInfo.name) {
-          client = await tx.client.update({
-            where: { id: client.id },
+          // Optionally update the client name if it's different and not empty
+          if (clientInfo.name && client.name !== clientInfo.name) {
+            client = await tx.client.update({
+              where: { id: client.id },
+              data: {
+                name: clientInfo.name,
+                updatedAt: new Date(),
+              },
+            });
+          }
+        } else {
+          // Create new client
+          client = await tx.client.create({
             data: {
               name: clientInfo.name,
+              primaryEmail: clientInfo.primaryEmail,
+              status: "ACTIVE",
+              createdAt: new Date(),
               updatedAt: new Date(),
             },
           });
+          logger.info(
+            {
+              clientId: client.id,
+              correlationId,
+            },
+            "Created new client"
+          );
         }
-      } else {
-        // Create new client
-        client = await tx.client.create({
+
+        // Step 3: Extract project information
+        const projectInfo = this.extractProjectInfo(parsedBody);
+
+        // Step 4: Create new project
+        const project = await tx.project.create({
           data: {
-            name: clientInfo.name,
-            primaryEmail: clientInfo.primaryEmail,
-            status: "ACTIVE",
+            clientId: client.id,
+            name: projectInfo.name,
+            phase: projectInfo.phase,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
         });
+
         logger.info(
           {
+            projectId: project.id,
             clientId: client.id,
             correlationId,
           },
-          "Created new client"
+          "Created new project"
         );
-      }
 
-      // Step 3: Extract project information
-      const projectInfo = this.extractProjectInfo(parsedBody);
-
-      // Step 4: Create new project
-      const project = await tx.project.create({
-        data: {
-          clientId: client.id,
-          name: projectInfo.name,
-          phase: projectInfo.phase,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-
-      logger.info(
-        {
-          projectId: project.id,
-          clientId: client.id,
-          correlationId,
-        },
-        "Created new project"
-      );
-
-      // TODO: Set formTitle field in questionnaire_response db table and use here.
-      // Step 5: Store questionnaire response
-      const questionnaireResponse = await tx.questionnaireResponse.create({
-        data: {
-          projectId: project.id,
-          formId: parsedBody.metadata.formId,
-          responseId: parsedBody.responseId,
-          responses: parsedBody.responses,
-          respondentEmail: clientInfo.respondentEmail,
-          submittedAt: new Date(parsedBody.timestamp),
-          processedAt: new Date(),
-          processingStatus: ProcessingStatus.PROCESSED,
-          retryCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-
-      logger.info(
-        {
-          questionnaireResponseId: questionnaireResponse.id,
-          projectId: project.id,
-          correlationId,
-        },
-        "Stored questionnaire response"
-      );
-
-      // Step 6: Create email thread with unique reply-to
-      const replyToAddress = this.generateReplyToAddress(client.id, project.id);
-      const emailThread = await tx.emailThread.create({
-        data: {
-          projectId: project.id,
-          clientId: client.id,
-          replyToAddress,
-          createdAt: new Date(),
-        },
-      });
-
-      logger.info(
-        {
-          emailThreadId: emailThread.id,
-          replyToAddress,
-          correlationId,
-        },
-        "Created email thread"
-      );
-
-      // Step 7: Log project phase change
-      await tx.projectPhaseLog.create({
-        data: {
-          projectId: project.id,
-          fromPhase: null,
-          toPhase: ProjectPhase.QUESTIONNAIRE,
-          reason: "Form submission received",
-          actor: Actor.SYSTEM,
-          at: new Date(),
-        },
-      });
-
-      // Step 8: Create audit log entry
-      await tx.auditLog.create({
-        data: {
-          projectId: project.id,
-          actor: "SYSTEM (Form Submission)",
-          action: "FORM_SUBMITTED",
-          details: {
+        // TODO: Set formTitle field in questionnaire_response db table and use here.
+        // Step 5: Store questionnaire response
+        const questionnaireResponse = await tx.questionnaireResponse.create({
+          data: {
+            projectId: project.id,
             formId: parsedBody.metadata.formId,
             responseId: parsedBody.responseId,
-            formTitle: parsedBody.metadata.formTitle,
-            clientEmail: clientInfo.primaryEmail,
+            responses: parsedBody.responses,
+            respondentEmail: clientInfo.respondentEmail,
+            submittedAt: new Date(parsedBody.timestamp),
+            processedAt: new Date(),
+            processingStatus: ProcessingStatus.PROCESSED,
+            retryCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        logger.info(
+          {
+            questionnaireResponseId: questionnaireResponse.id,
+            projectId: project.id,
             correlationId,
           },
-          at: new Date(),
-        },
-      });
+          "Stored questionnaire response"
+        );
 
-      // Validate that all required data was created successfully
-      if (!client || !client.id) {
-        throw new Error("Failed to create or retrieve client");
-      }
-      if (!project || !project.id) {
-        throw new Error("Failed to create project");
-      }
-      if (!questionnaireResponse || !questionnaireResponse.id) {
-        throw new Error("Failed to create questionnaire response");
-      }
-      if (!emailThread || !emailThread.id) {
-        throw new Error("Failed to create email thread");
-      }
-      if (!replyToAddress) {
-        throw new Error("Failed to generate reply-to address");
-      }
+        // Step 6: Create email thread with unique reply-to
+        const replyToAddress = this.generateReplyToAddress(
+          client.id,
+          project.id
+        );
+        const emailThread = await tx.emailThread.create({
+          data: {
+            projectId: project.id,
+            clientId: client.id,
+            replyToAddress,
+            createdAt: new Date(),
+          },
+        });
 
-      return {
-        client,
-        project,
-        questionnaireResponse,
-        emailThread,
-        replyToAddress,
-      };
-    });
+        logger.info(
+          {
+            emailThreadId: emailThread.id,
+            replyToAddress,
+            correlationId,
+          },
+          "Created email thread"
+        );
+
+        // Step 7: Log project phase change
+        await tx.projectPhaseLog.create({
+          data: {
+            projectId: project.id,
+            fromPhase: null,
+            toPhase: ProjectPhase.QUESTIONNAIRE,
+            reason: "Form submission received",
+            actor: Actor.SYSTEM,
+            at: new Date(),
+          },
+        });
+
+        // Step 8: Create audit log entry
+        await tx.auditLog.create({
+          data: {
+            projectId: project.id,
+            actor: "SYSTEM (Form Submission)",
+            action: "FORM_SUBMITTED",
+            details: {
+              formId: parsedBody.metadata.formId,
+              responseId: parsedBody.responseId,
+              formTitle: parsedBody.metadata.formTitle,
+              clientEmail: clientInfo.primaryEmail,
+              correlationId,
+            },
+            at: new Date(),
+          },
+        });
+
+        // Validate that all required data was created successfully
+        if (!client || !client.id) {
+          throw new Error("Failed to create or retrieve client");
+        }
+        if (!project || !project.id) {
+          throw new Error("Failed to create project");
+        }
+        if (!questionnaireResponse || !questionnaireResponse.id) {
+          throw new Error("Failed to create questionnaire response");
+        }
+        if (!emailThread || !emailThread.id) {
+          throw new Error("Failed to create email thread");
+        }
+        if (!replyToAddress) {
+          throw new Error("Failed to generate reply-to address");
+        }
+
+        return {
+          client,
+          project,
+          questionnaireResponse,
+          emailThread,
+          replyToAddress,
+        };
+      },
+      { timeout: 30000 } // 30 seconds timeout for complex multi-operation transaction
+    );
   }
 
   /**
