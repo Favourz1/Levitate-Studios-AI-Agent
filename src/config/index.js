@@ -58,6 +58,7 @@ const envSchema = Joi.object({
 
   // Application
   ADMIN_EMAIL: Joi.string().email().required(),
+  DEVELOPER_EMAIL: Joi.string().email().required(),
   FRONTEND_URL: Joi.string().uri().required(),
   EMAIL_DOMAIN: Joi.string().required(),
   EMAIL_REPLY_DOMAIN: Joi.string().required(),
@@ -96,6 +97,7 @@ const appConfig = {
       ? envVars.FRONTEND_URL.slice(0, -1)
       : envVars.FRONTEND_URL,
     adminEmail: envVars.ADMIN_EMAIL,
+    developerEmail: envVars.DEVELOPER_EMAIL,
     baseUrl: envVars.BASE_URL.endsWith("/")
       ? envVars.BASE_URL.slice(0, -1)
       : envVars.BASE_URL,

@@ -2900,9 +2900,8 @@ class GoogleIntegration {
                 email: appConfig.server.adminEmail,
                 role: "writer",
               },
-              // TODO: Remove this after testing
               {
-                email: "okohfavour91@gmail.com",
+                email: appConfig.server.developerEmail,
                 role: "writer",
               },
             ];

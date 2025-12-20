@@ -2826,6 +2826,312 @@ class EmailTemplateService {
   }
 
   /**
+   * Generate developer error notification email template
+   * Sent to developer when a 5xx error occurs in the global error handler
+   * @param {Object} error - Error object
+   * @param {Object} req - Express request object
+   * @param {number} statusCode - HTTP status code
+   * @param {string} correlationId - Correlation ID for tracking
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateDeveloperErrorNotificationTemplate(
+    error,
+    req,
+    statusCode,
+    correlationId
+  ) {
+    try {
+      // Helper function to escape HTML to prevent XSS
+      const escapeHtml = (text) => {
+        if (!text || typeof text !== "string") return text || "";
+        return text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#x27;");
+      };
+
+      const subject = `🚨Server Error - Levitate AI Agent - ${
+        req?.method || "UNKNOWN"
+      } ${req?.url || "UNKNOWN"}`;
+
+      // Format request body safely (truncate if too long)
+      const requestBody =
+        req?.body && typeof req.body === "object"
+          ? JSON.stringify(req.body, null, 2).substring(0, 2000)
+          : req?.body
+          ? String(req.body).substring(0, 2000)
+          : "N/A";
+
+      // Format query params
+      const queryParams =
+        req?.query && Object.keys(req.query).length > 0
+          ? JSON.stringify(req.query, null, 2)
+          : "N/A";
+
+      // Format headers (exclude sensitive info)
+      const safeHeaders = { ...req?.headers };
+      if (safeHeaders.authorization) {
+        safeHeaders.authorization = "[REDACTED]";
+      }
+      if (safeHeaders.cookie) {
+        safeHeaders.cookie = "[REDACTED]";
+      }
+      const headers = JSON.stringify(safeHeaders, null, 2).substring(0, 2000);
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${escapeHtml(subject)}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 800px;
+              margin: 0 auto;
+              padding: 20px;
+              background-color: #f4f4f4;
+            }
+            .container {
+              background-color: #ffffff;
+              border-radius: 8px;
+              padding: 30px;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 2px solid #dc3545;
+            }
+            .header h1 {
+              color: #dc3545;
+              margin: 0;
+              font-size: 24px;
+            }
+            .header .icon {
+              font-size: 32px;
+              margin-right: 10px;
+            }
+            .content {
+              margin: 20px 0;
+            }
+            .info-box {
+              background-color: #f8f9fa;
+              border-left: 4px solid #dc3545;
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 4px;
+            }
+            .info-box h3 {
+              margin-top: 0;
+              color: #dc3545;
+            }
+            .info-box ul {
+              list-style: none;
+              padding: 0;
+              margin: 10px 0;
+            }
+            .info-box li {
+              padding: 5px 0;
+            }
+            .info-box strong {
+              color: #333;
+            }
+            .code-block {
+              background-color: #f8f9fa;
+              border: 1px solid #dee2e6;
+              border-radius: 4px;
+              padding: 15px;
+              margin: 20px 0;
+              font-family: 'Courier New', monospace;
+              font-size: 12px;
+              white-space: pre-wrap;
+              overflow-x: auto;
+              max-height: 400px;
+              overflow-y: auto;
+              word-break: break-all;
+            }
+            .error-badge {
+              display: inline-block;
+              background-color: #dc3545;
+              color: white;
+              padding: 5px 15px;
+              border-radius: 20px;
+              font-size: 14px;
+              font-weight: bold;
+              margin: 10px 0;
+            }
+            .footer {
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #dee2e6;
+              text-align: center;
+              color: #6c757d;
+              font-size: 12px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1><span class="icon">🚨</span>Server Error Notification</h1>
+              <p>A ${statusCode} error occurred in the application</p>
+            </div>
+            
+            <div class="content">
+              <div class="info-box">
+                <h3>📋 Error Details</h3>
+                <ul>
+                  <li><strong>Status Code:</strong> <span class="error-badge">${statusCode}</span></li>
+                  <li><strong>Error Name:</strong> ${escapeHtml(
+                    error?.name || "Unknown"
+                  )}</li>
+                  <li><strong>Error Message:</strong> ${escapeHtml(
+                    error?.message || "No message"
+                  )}</li>
+                  <li><strong>Error Type:</strong> ${escapeHtml(
+                    error?.constructor?.name || "Unknown"
+                  )}</li>
+                  <li><strong>Correlation ID:</strong> ${escapeHtml(
+                    correlationId || "N/A"
+                  )}</li>
+                  <li><strong>Timestamp:</strong> ${new Date().toLocaleString(
+                    "en-NG",
+                    {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    }
+                  )}</li>
+                </ul>
+              </div>
+
+              <div class="info-box">
+                <h3>🌐 Request Details</h3>
+                <ul>
+                  <li><strong>Method:</strong> ${escapeHtml(
+                    req?.method || "N/A"
+                  )}</li>
+                  <li><strong>URL:</strong> ${escapeHtml(
+                    req?.url || "N/A"
+                  )}</li>
+                  <li><strong>Path:</strong> ${escapeHtml(
+                    req?.path || "N/A"
+                  )}</li>
+                  <li><strong>IP Address:</strong> ${escapeHtml(
+                    req?.ip || req?.connection?.remoteAddress || "N/A"
+                  )}</li>
+                  <li><strong>User Agent:</strong> ${escapeHtml(
+                    req?.headers?.["user-agent"] || "N/A"
+                  )}</li>
+                  <li><strong>Content Type:</strong> ${escapeHtml(
+                    req?.headers?.["content-type"] || "N/A"
+                  )}</li>
+                  <li><strong>User ID:</strong> ${req?.user?.id || "N/A"}</li>
+                </ul>
+              </div>
+
+              ${
+                error?.stack
+                  ? `
+              <div class="info-box">
+                <h3>📚 Stack Trace</h3>
+                <div class="code-block">${escapeHtml(error.stack)}</div>
+              </div>
+              `
+                  : ""
+              }
+
+              ${
+                requestBody && requestBody !== "N/A"
+                  ? `
+              <div class="info-box">
+                <h3>📦 Request Body</h3>
+                <div class="code-block">${escapeHtml(requestBody)}</div>
+              </div>
+              `
+                  : ""
+              }
+
+              ${
+                queryParams && queryParams !== "N/A"
+                  ? `
+              <div class="info-box">
+                <h3>🔍 Query Parameters</h3>
+                <div class="code-block">${escapeHtml(queryParams)}</div>
+              </div>
+              `
+                  : ""
+              }
+
+              <div class="info-box">
+                <h3>📋 Request Headers</h3>
+                <div class="code-block">${escapeHtml(headers)}</div>
+              </div>
+
+              ${
+                error?.context
+                  ? `
+              <div class="info-box">
+                <h3>🔧 Error Context</h3>
+                <div class="code-block">${escapeHtml(
+                  JSON.stringify(error.context, null, 2)
+                )}</div>
+              </div>
+              `
+                  : ""
+              }
+            </div>
+            
+            <div class="footer">
+              <p><small>This is an automated error notification from Levitate Studios AI Agent.</small></p>
+              <p><small>Environment: ${
+                process.env.NODE_ENV || "unknown"
+              } | Server: ${process.env.BASE_URL || "N/A"}</small></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      logger.debug({
+        message: "Generated developer error notification template",
+        statusCode,
+        errorName: error?.name,
+        correlationId,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate developer error notification template",
+        error: error.message,
+        statusCode,
+        correlationId,
+      });
+      // Return a simple fallback template
+      return {
+        subject: `Server Error ${statusCode}`,
+        htmlContent: `<h1>Server Error</h1><p>Status: ${statusCode}</p><p>Error: ${
+          error?.message || "Unknown"
+        }</p>`,
+      };
+    }
+  }
+
+  /**
    * Sanitize template content to prevent XSS
    * @param {string} content - Content to sanitize
    * @returns {string} Sanitized content

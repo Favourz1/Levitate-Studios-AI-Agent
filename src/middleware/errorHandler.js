@@ -1,6 +1,8 @@
 const { BaseError, createErrorResponse } = require("@/utils/errors");
 const { createLogger, logError } = require("@/utils/logger");
 const { appConfig } = require("@/config");
+const { brevoIntegration } = require("@/integrations/brevo");
+const { EmailTemplateService } = require("@/services/emailTemplateService");
 
 const logger = createLogger("middleware:errorHandler");
 
@@ -23,7 +25,55 @@ const errorHandler = (error, req, res, next) => {
   // Handle operational errors
   if (error instanceof BaseError) {
     const errorResponse = createErrorResponse(error);
-    res.status(errorResponse.statusCode).json(errorResponse);
+    const statusCode = errorResponse.statusCode;
+
+    // Send developer notification for 5xx errors from BaseError
+    if (statusCode >= 500 && appConfig.server.developerEmail) {
+      // Send notification asynchronously without blocking the response
+      // Wrap in try-catch to ensure it doesn't break error handling
+      setImmediate(async () => {
+        try {
+          const errorTemplate =
+            EmailTemplateService.generateDeveloperErrorNotificationTemplate(
+              error,
+              req,
+              statusCode,
+              req.correlationId
+            );
+
+          await brevoIntegration.sendTransactionalEmail({
+            senderEmail: `noreply@${appConfig.emailDomain}`,
+            senderName: "Levitate Studios AI Agent",
+            to: [appConfig.server.developerEmail],
+            subject: errorTemplate.subject,
+            htmlContent: errorTemplate.htmlContent,
+          });
+
+          logger.info(
+            {
+              statusCode,
+              correlationId: req.correlationId,
+              developerEmail: appConfig.server.developerEmail,
+              errorCode: error.code,
+            },
+            "Developer error notification email sent for BaseError"
+          );
+        } catch (emailError) {
+          // Log but don't throw - we don't want email failures to break error handling
+          logger.error(
+            {
+              statusCode,
+              correlationId: req.correlationId,
+              emailError: emailError.message,
+              originalError: error.message,
+            },
+            "Failed to send developer error notification email for BaseError"
+          );
+        }
+      });
+    }
+
+    res.status(statusCode).json(errorResponse);
     return;
   }
 
@@ -123,6 +173,52 @@ const errorHandler = (error, req, res, next) => {
     appConfig.server.nodeEnv === "development"
       ? error.message
       : "Internal server error";
+
+  // Send developer notification for 5xx errors
+  // Only send in production or if explicitly configured
+  if (statusCode >= 500 && appConfig.server.developerEmail) {
+    // Send notification asynchronously without blocking the response
+    // Wrap in try-catch to ensure it doesn't break error handling
+    setImmediate(async () => {
+      try {
+        const errorTemplate =
+          EmailTemplateService.generateDeveloperErrorNotificationTemplate(
+            error,
+            req,
+            statusCode,
+            req.correlationId
+          );
+
+        await brevoIntegration.sendTransactionalEmail({
+          senderEmail: `noreply@${appConfig.emailDomain}`,
+          senderName: "Levitate Studios AI Agent",
+          to: [appConfig.server.developerEmail],
+          subject: errorTemplate.subject,
+          htmlContent: errorTemplate.htmlContent,
+        });
+
+        logger.info(
+          {
+            statusCode,
+            correlationId: req.correlationId,
+            developerEmail: appConfig.server.developerEmail,
+          },
+          "Developer error notification email sent"
+        );
+      } catch (emailError) {
+        // Log but don't throw - we don't want email failures to break error handling
+        logger.error(
+          {
+            statusCode,
+            correlationId: req.correlationId,
+            emailError: emailError.message,
+            originalError: error.message,
+          },
+          "Failed to send developer error notification email"
+        );
+      }
+    });
+  }
 
   res.status(statusCode).json({
     success: false,
