@@ -6,6 +6,8 @@ const {
   SlideType,
   DocumentType,
   DocumentStatus,
+  SystemActors,
+  AuditActions,
 } = require("@/constants");
 const { llmClient } = require("@/llm/client");
 const { tocGenerationSchema } = require("@/llm/schemas/workplanSchemas");
@@ -857,6 +859,22 @@ Return a JSON object with:
         },
       });
 
+      // Create audit log for successful TOC generation
+      await prisma.auditLog.create({
+        data: {
+          projectId,
+          actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+          action: AuditActions.WORKPLAN_GENERATION_STARTED,
+          details: {
+            documentId: document.id,
+            serviceType,
+            slideCount: slides.length,
+            traceId: result.traceId,
+          },
+          at: new Date(),
+        },
+      });
+
       logger.info(
         {
           projectId,
@@ -874,6 +892,30 @@ Return a JSON object with:
         { projectId, serviceType, error: error.message, stack: error.stack },
         "Failed to generate TOC"
       );
+
+      // Create audit log for failed TOC generation
+      try {
+        await prisma.auditLog.create({
+          data: {
+            projectId,
+            actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+            action: AuditActions.WORKPLAN_GENERATION_FAILED,
+            details: {
+              serviceType,
+              error: error.message,
+              errorType: error.constructor.name,
+              stage: "toc_generation",
+            },
+            at: new Date(),
+          },
+        });
+      } catch (auditError) {
+        logger.error(
+          { projectId, error: auditError.message },
+          "Failed to create audit log for TOC generation failure"
+        );
+      }
+
       throw error;
     }
   }

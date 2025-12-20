@@ -426,6 +426,33 @@ Return ONLY valid JSON. No extra fields.`;
             updatedAt: new Date(),
           },
         });
+
+        // Get project ID from slide's document
+        const slideWithDocument = await prisma.workplanSlide.findUnique({
+          where: { id: slideId },
+          include: {
+            document: {
+              select: { projectId: true },
+            },
+          },
+        });
+
+        // Create audit log for failed design generation
+        await prisma.auditLog.create({
+          data: {
+            projectId: slideWithDocument?.document?.projectId || null,
+            actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+            action: AuditActions.WORKPLAN_GENERATION_FAILED,
+            details: {
+              slideId,
+              slideType: slideData?.slideType,
+              error: error.message,
+              errorType: error.constructor.name,
+              stage: "design_generation",
+            },
+            at: new Date(),
+          },
+        });
       } catch (updateError) {
         logger.error(
           { slideId, error: updateError.message },

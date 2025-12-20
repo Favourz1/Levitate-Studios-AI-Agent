@@ -94,6 +94,28 @@ router.post(
       asanaUserGid = asanaUser.gid;
     } catch (error) {
       // If Asana API call fails, return error
+      // Create audit log for failed team member creation attempt
+      try {
+        await prisma.auditLog.create({
+          data: {
+            actor: userId.toString(),
+            actingRole,
+            action: AuditActions.CREATE_TEAM_MEMBER,
+            details: {
+              email,
+              name: req.user.name,
+              error: error.message,
+              errorType: error.constructor.name,
+              stage: "asana_verification",
+            },
+            at: new Date(),
+          },
+        });
+      } catch (auditError) {
+        // Log but don't fail the request if audit log fails
+        console.error("Failed to create audit log:", auditError);
+      }
+
       return sendErrorResponse(
         res,
         `Failed to verify user in Asana workspace: ${error.message}. Please ensure the user exists in Asana before adding them as a team member.`,

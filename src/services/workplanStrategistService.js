@@ -193,6 +193,23 @@ class WorkplanStrategistService {
             updatedAt: new Date(),
           },
         });
+
+        // Create audit log for failed content synthesis
+        await prisma.auditLog.create({
+          data: {
+            projectId: context.project?.id || null,
+            actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+            action: AuditActions.WORKPLAN_GENERATION_FAILED,
+            details: {
+              slideId,
+              slideType: slide?.slideType,
+              error: error.message,
+              errorType: error.constructor.name,
+              stage: "content_synthesis",
+            },
+            at: new Date(),
+          },
+        });
       } catch (updateError) {
         logger.error(
           { slideId, error: updateError.message },

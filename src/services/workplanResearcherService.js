@@ -6,6 +6,8 @@ const {
   ResearchStatus,
   DocumentType,
   DocumentStatus,
+  SystemActors,
+  AuditActions,
 } = require("@/constants");
 const {
   competitorAnalysisTool,
@@ -603,6 +605,31 @@ Extract the competitor list now.`;
         },
       });
 
+      // Get project ID from slide's document
+      const slideWithDocument = await prisma.workplanSlide.findUnique({
+        where: { id: slideId },
+        include: {
+          document: {
+            select: { projectId: true },
+          },
+        },
+      });
+
+      // Create audit log for successful research
+      await prisma.auditLog.create({
+        data: {
+          projectId: slideWithDocument?.document?.projectId || null,
+          actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+          action: AuditActions.WORKPLAN_SLIDE_RESEARCH_COMPLETED,
+          details: {
+            slideId,
+            slideType: slide.slideType,
+            sourceCount: researchData.sources?.length || 0,
+          },
+          at: new Date(),
+        },
+      });
+
       logger.info(
         {
           slideId,
@@ -631,6 +658,33 @@ Extract the competitor list now.`;
           data: {
             researchStatus: ResearchStatus.FAILED,
             updatedAt: new Date(),
+          },
+        });
+
+        // Get project ID from slide's document
+        const slideWithDocument = await prisma.workplanSlide.findUnique({
+          where: { id: slideId },
+          include: {
+            document: {
+              select: { projectId: true },
+            },
+          },
+        });
+
+        // Create audit log for failed research
+        await prisma.auditLog.create({
+          data: {
+            projectId: slideWithDocument?.document?.projectId || null,
+            actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+            action: AuditActions.WORKPLAN_GENERATION_FAILED,
+            details: {
+              slideId,
+              slideType: slide?.slideType,
+              error: error.message,
+              errorType: error.constructor.name,
+              stage: "research",
+            },
+            at: new Date(),
           },
         });
       } catch (updateError) {

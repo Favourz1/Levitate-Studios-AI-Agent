@@ -238,182 +238,223 @@ class WorkplanDocumentBuilderService {
    * @returns {Promise<{documentId:number, googleDocUrl:string, driveFileId:string}>}
    */
   static async buildGoogleDoc(documentId) {
-    if (!documentId) {
-      throw new Error("documentId is required to build a workplan");
-    }
-
-    const workplanDoc = await prisma.document.findUnique({
-      where: { id: documentId },
-      include: {
-        project: { include: { client: true } },
-        workplanSlides: { orderBy: { slideNumber: "asc" } },
-      },
-    });
-
-    if (!workplanDoc) {
-      throw new Error(`Workplan document not found: ${documentId}`);
-    }
-    if (workplanDoc.type !== DocumentType.WORKPLAN) {
-      throw new Error(
-        `Document ${documentId} is not a workplan (type=${workplanDoc.type})`
-      );
-    }
-    if (
-      !workplanDoc.workplanSlides ||
-      workplanDoc.workplanSlides.length === 0
-    ) {
-      throw new Error("Cannot build workplan without slides");
-    }
-
-    logger.info(
-      {
-        documentId,
-        projectId: workplanDoc.projectId,
-        slideCount: workplanDoc.workplanSlides.length,
-      },
-      "Starting workplan document build"
-    );
-
-    const coverBlocks = [
-      {
-        type: "image",
-        fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
-        url: BrandAssets.LEVITATE_LOGO_URL,
-        width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
-        height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
-      },
-      {
-        type: "heading",
-        level: 1,
-        text: workplanDoc.project?.name || "Workplan",
-      },
-      {
-        type: "paragraph",
-        text: `Client: ${
-          workplanDoc.project?.client?.name || "Unknown Client"
-        }`,
-      },
-      {
-        type: "paragraph",
-        text: `Generated: ${new Date().toLocaleDateString("en-NG", {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })}`,
-      },
-      { type: "spacer", height: 24 },
-    ];
-
-    const tocBlocks = [
-      { type: "heading", level: 1, text: "Table of Contents" },
-      {
-        type: "bullets",
-        items: workplanDoc.workplanSlides.map((slide) => {
-          const title = slide.title || slide.slideType || "Slide";
-          const slideType = slide.slideType
-            ? ` (${this.formatSlideType(slide.slideType)})`
-            : "";
-          return `${slide.slideNumber || ""}. ${title}${slideType}`;
-        }),
-      },
-      { type: "spacer", height: 18 },
-    ];
-
-    const slideBlocks = [];
-    workplanDoc.workplanSlides.forEach((slide, index) => {
-      if (index > 0) {
-        // Use adequate spacer instead of horizontalRule
-        slideBlocks.push({ type: "spacer", height: 18 });
-        slideBlocks.push({ type: "spacer", height: 12 });
+    let workplanDoc;
+    try {
+      if (!documentId) {
+        throw new Error("documentId is required to build a workplan");
       }
-      slideBlocks.push(...this.convertSlideToBlocks(slide));
-    });
 
-    const allBlocks = [...coverBlocks, ...tocBlocks, ...slideBlocks];
-    const docTitle = `Workplan - ${
-      workplanDoc.project?.name || workplanDoc.id
-    }`;
-
-    // Prepare sharing emails - include general team gmail for non-financial documents
-    const shareEmails = [];
-    if (
-      appConfig.generalTeamGmail &&
-      !isFinancialDocument(DocumentType.WORKPLAN)
-    ) {
-      shareEmails.push({
-        email: appConfig.generalTeamGmail,
-        role: "reader",
-        options: { sendNotification: false },
-      });
-    }
-
-    const docResult = await retry(
-      () =>
-        googleIntegration.createFormattedDocument(docTitle, allBlocks, {
-          shareWithEmails: shareEmails,
-        }),
-      3,
-      1500
-    );
-
-    const completedAt = new Date().toISOString();
-    const snapshotText = this.buildSnapshotText(
-      workplanDoc,
-      workplanDoc.workplanSlides
-    );
-
-    let revision;
-    await prisma.$transaction(async (tx) => {
-      revision = await tx.documentRevision.create({
-        data: {
-          documentId,
-          snapshotText,
-          createdBy: CreatedBy.AGENT,
+      workplanDoc = await prisma.document.findUnique({
+        where: { id: documentId },
+        include: {
+          project: { include: { client: true } },
+          workplanSlides: { orderBy: { slideNumber: "asc" } },
         },
       });
 
-      await tx.document.update({
-        where: { id: documentId },
+      if (!workplanDoc) {
+        throw new Error(`Workplan document not found: ${documentId}`);
+      }
+      if (workplanDoc.type !== DocumentType.WORKPLAN) {
+        throw new Error(
+          `Document ${documentId} is not a workplan (type=${workplanDoc.type})`
+        );
+      }
+      if (
+        !workplanDoc.workplanSlides ||
+        workplanDoc.workplanSlides.length === 0
+      ) {
+        throw new Error("Cannot build workplan without slides");
+      }
+
+      logger.info(
+        {
+          documentId,
+          projectId: workplanDoc.projectId,
+          slideCount: workplanDoc.workplanSlides.length,
+        },
+        "Starting workplan document build"
+      );
+
+      const coverBlocks = [
+        {
+          type: "image",
+          fileId: BrandAssets.LEVITATE_LOGO_FILE_ID,
+          url: BrandAssets.LEVITATE_LOGO_URL,
+          width: BrandAssets.LOGO_DIMENSIONS.WIDTH,
+          height: BrandAssets.LOGO_DIMENSIONS.HEIGHT,
+        },
+        {
+          type: "heading",
+          level: 1,
+          text: workplanDoc.project?.name || "Workplan",
+        },
+        {
+          type: "paragraph",
+          text: `Client: ${
+            workplanDoc.project?.client?.name || "Unknown Client"
+          }`,
+        },
+        {
+          type: "paragraph",
+          text: `Generated: ${new Date().toLocaleDateString("en-NG", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}`,
+        },
+        { type: "spacer", height: 24 },
+      ];
+
+      const tocBlocks = [
+        { type: "heading", level: 1, text: "Table of Contents" },
+        {
+          type: "bullets",
+          items: workplanDoc.workplanSlides.map((slide) => {
+            const title = slide.title || slide.slideType || "Slide";
+            const slideType = slide.slideType
+              ? ` (${this.formatSlideType(slide.slideType)})`
+              : "";
+            return `${slide.slideNumber || ""}. ${title}${slideType}`;
+          }),
+        },
+        { type: "spacer", height: 18 },
+      ];
+
+      const slideBlocks = [];
+      workplanDoc.workplanSlides.forEach((slide, index) => {
+        if (index > 0) {
+          // Use adequate spacer instead of horizontalRule
+          slideBlocks.push({ type: "spacer", height: 18 });
+          slideBlocks.push({ type: "spacer", height: 12 });
+        }
+        slideBlocks.push(...this.convertSlideToBlocks(slide));
+      });
+
+      const allBlocks = [...coverBlocks, ...tocBlocks, ...slideBlocks];
+      const docTitle = `Workplan - ${
+        workplanDoc.project?.name || workplanDoc.id
+      }`;
+
+      // Prepare sharing emails - include general team gmail for non-financial documents
+      const shareEmails = [];
+      if (
+        appConfig.generalTeamGmail &&
+        !isFinancialDocument(DocumentType.WORKPLAN)
+      ) {
+        shareEmails.push({
+          email: appConfig.generalTeamGmail,
+          role: "reader",
+          options: { sendNotification: false },
+        });
+      }
+
+      const docResult = await retry(
+        () =>
+          googleIntegration.createFormattedDocument(docTitle, allBlocks, {
+            shareWithEmails: shareEmails,
+          }),
+        3,
+        1500
+      );
+
+      const completedAt = new Date().toISOString();
+      const snapshotText = this.buildSnapshotText(
+        workplanDoc,
+        workplanDoc.workplanSlides
+      );
+
+      let revision;
+      await prisma.$transaction(async (tx) => {
+        revision = await tx.documentRevision.create({
+          data: {
+            documentId,
+            snapshotText,
+            createdBy: CreatedBy.AGENT,
+          },
+        });
+
+        await tx.document.update({
+          where: { id: documentId },
+          data: {
+            status: DocumentStatus.COMPLETED,
+            driveFileId: docResult.id,
+            currentRevisionId: revision.id,
+            metadataInfo: {
+              ...(workplanDoc.metadataInfo || {}),
+              completedAt,
+              googleDocUrl: docResult.webViewLink,
+            },
+          },
+        });
+      });
+
+      await prisma.auditLog.create({
         data: {
-          status: DocumentStatus.COMPLETED,
-          driveFileId: docResult.id,
-          currentRevisionId: revision.id,
-          metadataInfo: {
-            ...(workplanDoc.metadataInfo || {}),
-            completedAt,
+          projectId: workplanDoc.projectId,
+          actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+          action: AuditActions.WORKPLAN_GENERATION_COMPLETED,
+          details: {
+            documentId,
             googleDocUrl: docResult.webViewLink,
           },
+          at: new Date(),
         },
       });
-    });
 
-    await prisma.auditLog.create({
-      data: {
-        projectId: workplanDoc.projectId,
-        actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
-        action: AuditActions.WORKPLAN_GENERATION_COMPLETED,
-        details: {
+      logger.info(
+        {
           documentId,
+          driveFileId: docResult.id,
           googleDocUrl: docResult.webViewLink,
         },
-        at: new Date(),
-      },
-    });
+        "Workplan document built successfully"
+      );
 
-    logger.info(
-      {
+      return {
         documentId,
-        driveFileId: docResult.id,
         googleDocUrl: docResult.webViewLink,
-      },
-      "Workplan document built successfully"
-    );
+        driveFileId: docResult.id,
+      };
+    } catch (error) {
+      logger.error(
+        {
+          documentId,
+          projectId: workplanDoc?.projectId,
+          error: error.message,
+          errorType: error.constructor.name,
+          stack: error.stack,
+        },
+        "Failed to build workplan document"
+      );
 
-    return {
-      documentId,
-      googleDocUrl: docResult.webViewLink,
-      driveFileId: docResult.id,
-    };
+      // Create audit log for failed document build
+      if (workplanDoc?.projectId) {
+        try {
+          await prisma.auditLog.create({
+            data: {
+              projectId: workplanDoc.projectId,
+              actor: SystemActors.LEVITATE_AI_AGENT_SYSTEM,
+              action: AuditActions.WORKPLAN_GENERATION_FAILED,
+              details: {
+                documentId,
+                error: error.message,
+                errorType: error.constructor.name,
+                stage: "document_build",
+              },
+              at: new Date(),
+            },
+          });
+        } catch (auditError) {
+          logger.error(
+            { documentId, error: auditError.message },
+            "Failed to create audit log for document build failure"
+          );
+        }
+      }
+
+      throw error;
+    }
   }
 
   /**
