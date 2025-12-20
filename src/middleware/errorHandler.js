@@ -28,7 +28,11 @@ const errorHandler = (error, req, res, next) => {
     const statusCode = errorResponse.statusCode;
 
     // Send developer notification for 5xx errors from BaseError
-    if (statusCode >= 500 && appConfig.server.developerEmail) {
+    if (
+      statusCode >= 500 &&
+      appConfig.server.developerEmail &&
+      appConfig.server.nodeEnv === "production"
+    ) {
       // Send notification asynchronously without blocking the response
       // Wrap in try-catch to ensure it doesn't break error handling
       setImmediate(async () => {
@@ -176,7 +180,11 @@ const errorHandler = (error, req, res, next) => {
 
   // Send developer notification for 5xx errors
   // Only send in production or if explicitly configured
-  if (statusCode >= 500 && appConfig.server.developerEmail) {
+  if (
+    statusCode >= 500 &&
+    appConfig.server.developerEmail &&
+    appConfig.server.nodeEnv === "production"
+  ) {
     // Send notification asynchronously without blocking the response
     // Wrap in try-catch to ensure it doesn't break error handling
     setImmediate(async () => {
