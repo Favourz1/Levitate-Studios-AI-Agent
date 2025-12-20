@@ -6,14 +6,9 @@ const {
   TeamMemberSelectionService,
 } = require("@/services/teamMemberSelectionService");
 const { AsanaProjectService } = require("@/services/asanaProjectService");
-const { EmailTemplateService } = require("@/services/emailTemplateService");
-const { brevoIntegration } = require("@/integrations/brevo");
-const { googleIntegration } = require("@/integrations/google");
-const { appConfig } = require("@/config");
 const {
   AuditActions,
   SystemActors,
-  TeamRole,
   AsanaProjectBoardSections,
   DocumentType,
   DocumentStatus,
@@ -470,29 +465,12 @@ const asanaProjectInitProcessor = async (job) => {
     });
 
     // Step 10: Enqueue workplan generation (service type is cached if already determined)
+    // Use reusable triggerWorkplanGeneration function to ensure consistency
     try {
-      const serviceType = await WorkplanPlannerService.getServiceType(
-        project.id
-      );
-
-      await QueueService.addWorkplanGenerationJob(
-        {
-          projectId: project.id,
-          serviceType,
-          correlationId,
-        },
-        5
-      );
-
-      logger.info(
-        {
-          projectId,
-          serviceType,
-          correlationId,
-        },
-        "Workplan generation job enqueued"
-      );
+      await triggerWorkplanGeneration(project.id, correlationId);
     } catch (workplanError) {
+      // Don't fail the entire Asana init process if workplan job enqueue fails
+      // It can be retried later - just log the error
       logger.error(
         {
           projectId,
@@ -570,6 +548,48 @@ const asanaProjectInitProcessor = async (job) => {
   }
 };
 
+/**
+ * Trigger workplan generation job for a project
+ * This function is extracted to be reusable by UI manual operations
+ * @param {number} projectId - Project ID
+ * @param {string} correlationId - Correlation ID
+ * @returns {Promise<void>}
+ */
+async function triggerWorkplanGeneration(projectId, correlationId) {
+  try {
+    const serviceType = await WorkplanPlannerService.getServiceType(projectId);
+
+    await QueueService.addWorkplanGenerationJob(
+      {
+        projectId,
+        serviceType,
+        correlationId,
+      },
+      5
+    );
+
+    logger.info(
+      {
+        projectId,
+        serviceType,
+        correlationId,
+      },
+      "Workplan generation job enqueued"
+    );
+  } catch (error) {
+    logger.error(
+      {
+        projectId,
+        correlationId,
+        error: error.message,
+      },
+      "Failed to enqueue workplan generation job"
+    );
+    throw error;
+  }
+}
+
 module.exports = {
   asanaProjectInitProcessor,
+  triggerWorkplanGeneration,
 };

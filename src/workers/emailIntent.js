@@ -1082,7 +1082,19 @@ async function handleAcceptIntent(context, intentResult, correlationId) {
   }
 }
 
-async function handleBrandOriginAcceptance(project, correlationId) {
+/**
+ * Handle brand origin acceptance - advance phase and trigger quote generation
+ * @param {Object} project - Project data from context
+ * @param {string} correlationId - Correlation ID
+ * @param {Object} options - Optional settings
+ * @param {boolean} options.skipPhaseTransition - If true, caller handles phase transition
+ * @returns {Promise<void>}
+ */
+async function handleBrandOriginAcceptance(
+  project,
+  correlationId,
+  options = {}
+) {
   try {
     const dedupeKey = `project:${project.id}:quote:generate`;
 
@@ -1092,12 +1104,15 @@ async function handleBrandOriginAcceptance(project, correlationId) {
       correlationId,
     });
 
-    await transitionProjectPhaseIfNeeded(
-      project.id,
-      ProjectPhase.QUOTE_DOCUMENT,
-      "Client accepted brand origin document",
-      correlationId
-    );
+    // Only transition phase if not skipped (UI may handle phase transition differently)
+    if (!options.skipPhaseTransition) {
+      await transitionProjectPhaseIfNeeded(
+        project.id,
+        ProjectPhase.QUOTE_DOCUMENT,
+        "Client accepted brand origin document",
+        correlationId
+      );
+    }
 
     await AsanaPendingProjectsService.moveTaskToSection(
       project.id,
@@ -2249,9 +2264,11 @@ async function getIntentMetadataForRegeneration(emailId) {
  * Finalize project - move to Finalized phase and enqueue Asana project initialization
  * @param {number} projectId - Project ID
  * @param {string} correlationId - Correlation ID
+ * @param {Object} options - Optional settings
+ * @param {boolean} options.skipPhaseTransition - If true, caller handles phase transition
  * @returns {Promise<void>}
  */
-async function finalizeProject(projectId, correlationId) {
+async function finalizeProject(projectId, correlationId, options = {}) {
   try {
     logger.info(
       {
@@ -2269,12 +2286,15 @@ async function finalizeProject(projectId, correlationId) {
     );
 
     // Step 2: Update project phase to ASANA_INIT (not FINALIZED yet - that happens after workplan)
-    await transitionProjectPhaseIfNeeded(
-      projectId,
-      ProjectPhase.ASANA_INIT,
-      "Quote accepted by client - starting Asana project initialization",
-      correlationId
-    );
+    // Only transition phase if not skipped (UI may handle phase transition differently)
+    if (!options.skipPhaseTransition) {
+      await transitionProjectPhaseIfNeeded(
+        projectId,
+        ProjectPhase.ASANA_INIT,
+        "Quote accepted by client - starting Asana project initialization",
+        correlationId
+      );
+    }
 
     // Step 3: Enqueue Asana project initialization job
     const dedupeKey = `project:${projectId}:asana_init`;
@@ -2784,4 +2804,9 @@ module.exports = {
   detectFeedbackIntent,
   handleDetectedIntent,
   getIntentMetadataForRegeneration,
+  // Export reusable phase transition functions for manual UI operations
+  handleBrandOriginAcceptance,
+  handleQuoteAcceptance,
+  transitionProjectPhaseIfNeeded,
+  finalizeProject,
 };

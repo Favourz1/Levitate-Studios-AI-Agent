@@ -389,16 +389,25 @@ class FormSubmissionService {
    * @private
    */
   static async enqueueBrandOriginGeneration(projectId, correlationId) {
+    const { QueueService } = require("@/queues");
+    const { retry } = require("@/utils");
+    const { brevoIntegration } = require("@/integrations/brevo");
+    const { appConfig } = require("@/config");
+
+    const jobData = {
+      projectId,
+      correlationId,
+      timestamp: new Date().toISOString(),
+    };
+
     try {
-      const { QueueService } = require("@/queues");
-
-      const jobData = {
-        projectId,
-        correlationId,
-        timestamp: new Date().toISOString(),
-      };
-
-      const job = await QueueService.addBrandOriginGenerationJob(jobData, 1); // High priority
+      const job = await retry(
+        async () => {
+          return QueueService.addBrandOriginGenerationJob(jobData, 1); // High priority
+        },
+        3,
+        1000
+      );
 
       logger.info(
         {
@@ -421,7 +430,33 @@ class FormSubmissionService {
       );
       // Don't throw error - this shouldn't fail the main request
       // The document can be generated manually later if needed
-      // TODO: We should find way to retry here.
+
+      // Notify admin via email on persistent failure
+      try {
+        await brevoIntegration.sendTransactionalEmail({
+          to: [appConfig.server.adminEmail],
+          subject: `Brand Origin Generation Job Failed: Project ID: ${projectId}`,
+          htmlContent: `
+            <p>Failed to enqueue the brand origin generation job after 3 retry attempts.</p>
+            <ul>
+              <li>Project ID: ${projectId}</li>
+              <li>Correlation ID: ${correlationId}</li>
+              <li>Error: ${error.message}</li>
+            </ul>
+            <p>This requires manual attention. Notify your developer if issue persists.</p>
+          `,
+        });
+      } catch (notifyErr) {
+        logger.error(
+          {
+            projectId,
+            correlationId,
+            notifyErr: notifyErr.message,
+          },
+          "Failed to send admin notification email for brand origin enqueue failure"
+        );
+      }
+      // No throw here!
     }
   }
 
