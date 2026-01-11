@@ -1299,13 +1299,15 @@ class EmailTemplateService {
    * @param {Object} document - Document data
    * @param {Object} pdfFile - PDF file information
    * @param {Object} emailThread - Email thread data
+   * @param {Boolean} isRegeneration - If it's regeneration of document or not
    * @returns {Object} Email template with subject and htmlContent
    */
   static generateClientDocumentEmailTemplate(
     project,
     document,
     pdfFile,
-    emailThread
+    emailThread,
+    isRegeneration = false
   ) {
     try {
       const documentTypeName =

@@ -337,12 +337,15 @@ class DocumentSendingService {
       let emailSent = false;
       let clientEmailTemplate;
       try {
+        // Detect regeneration: document was sent before if lastSentRevisionId exists
+        const isRegeneration = result.document.lastSentRevisionId !== null;
         clientEmailTemplate =
           EmailTemplateService.generateClientDocumentEmailTemplate(
             result.project,
             result.document,
             pdfFile,
-            result.emailThread
+            result.emailThread,
+            isRegeneration
           );
 
         await brevoIntegration.sendTransactionalEmail({
