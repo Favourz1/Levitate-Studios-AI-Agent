@@ -1302,7 +1302,7 @@ class EmailTemplateService {
    * @param {Boolean} isRegeneration - If it's regeneration of document or not
    * @returns {Object} Email template with subject and htmlContent
    */
-  static generateClientDocumentEmailTemplate(
+  static generateClientDocumentEmailTemplateOld(
     project,
     document,
     pdfFile,
@@ -1405,6 +1405,2572 @@ class EmailTemplateService {
         </body>
         </html>
       `;
+
+      logger.debug({
+        message: "Generated client document email template",
+        projectId: project.id,
+        documentId: document.id,
+        clientName: project.client?.name,
+        documentType: document.type,
+      });
+
+      return {
+        subject,
+        htmlContent,
+      };
+    } catch (error) {
+      logger.error({
+        message: "Failed to generate client document email template",
+        error: error.message,
+        projectId: project?.id,
+        documentId: document?.id,
+      });
+      throw error;
+    }
+  }
+
+  // See all client email templates here:  https://codesandbox.io/p/sandbox/levitate-ai-agent-email-templates-fx6cjn
+  /**
+   * Generate client document email template with PDF attachment
+   * @param {Object} project - Project data
+   * @param {Object} document - Document data
+   * @param {Object} pdfFile - PDF file information
+   * @param {Object} emailThread - Email thread data
+   * @param {Boolean} isRegeneration - If it's regeneration of document or not
+   * @returns {Object} Email template with subject and htmlContent
+   */
+  static generateClientDocumentEmailTemplate(
+    project,
+    document,
+    pdfFile,
+    emailThread,
+    isRegeneration = false
+  ) {
+    try {
+      const documentTypeName =
+        document.type === DocumentType.BRAND_ORIGIN
+          ? DocumentTypeDisplayName.BRAND_ORIGIN
+          : DocumentTypeDisplayName.QUOTE;
+      const subject = isRegeneration
+        ? `Updated ${documentTypeName} Document - ${project.name}`
+        : `${documentTypeName} Document - ${project.name}`;
+      let htmlContent;
+      switch (document.type) {
+        case DocumentType.BRAND_ORIGIN:
+          // Initial generation
+          if (!isRegeneration) {
+            htmlContent = `
+            <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Our Vision for your brand</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style type="text/css">
+      body,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      ol,
+      li,
+      ul,
+      button,
+      a,
+      td {
+        font-family: "Inter Tight", Arial, "Helvetica Neue", Helvetica,
+          sans-serif;
+      }
+    </style>
+    <style>
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+
+      @media screen and (max-width: 600px) {
+        .content {
+          width: 100% !important;
+          display: block !important;
+          padding: 10px !important;
+        }
+
+        .header,
+        .body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .icon-column {
+          display: block !important;
+          width: 100% !important;
+          border-bottom: 1px solid #000;
+          border-right: none !important;
+        }
+
+        .icon-column:last-child {
+          border-bottom: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body
+    style="
+      font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    "
+  >
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 20px">
+          <table
+            class="content"
+            width="600"
+            border="0"
+            cellspacing="0"
+            cellpadding="0"
+            style="background-color: #ffffff; padding: 40px"
+          >
+            <!-- Header Logo -->
+            <tr>
+              <td align="right" style="padding-bottom: 20px">
+                <a href="https://levitate.ng" style="text-decoration: none">
+                  <img
+                    src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-short-logo_q7kxym.png"
+                    alt="Levitate Logo"
+                    width="50"
+                    style="display: block; border: 0"
+                  />
+                </a>
+              </td>
+            </tr>
+
+            <!-- Main Heading -->
+            <tr>
+              <td style="padding-bottom: 10px">
+                <h1
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 48px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #000000;
+                    line-height: 1.1;
+                  "
+                >
+                  Our Vision<br />for your brand
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="padding-bottom: 30px; border-bottom: 1px solid #e0e0e0"
+              >
+                <h2
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 28px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #00b9f0;
+                    line-height: 1.2;
+                  "
+                >
+                  is here and ready for review
+                </h2>
+              </td>
+            </tr>
+
+            <!-- Greeting & Body Text -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 30px;
+                  padding-bottom: 20px;
+                  font-size: 16px;
+                  color: #000000;
+                  line-height: 1.5;
+                "
+              >
+                <p style="margin: 0 0 20px 0">Dear ${
+                  project.client?.name || "Valued Client"
+                },</p>
+                <p style="margin: 0 0 20px 0">
+                  We're excited to share our vision for this project. The
+                  attached document outlines the strategic idea path and key
+                  deliverables for which we'd love your thoughts before we
+                  proceed. For response and any feedback, simply reply to this
+                  email with your comments.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Button -->
+            <tr>
+              <td style="padding-bottom: 30px">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      align="center"
+                      bgcolor="#000000"
+                      style="border-radius: 8px"
+                    >
+                      <a
+                        href="${pdfFile.webViewLink}"
+                        style="
+                          font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                            Helvetica, sans-serif;
+                          font-size: 16px;
+                          font-weight: 700;
+                          color: #ffffff;
+                          text-decoration: none;
+                          padding: 15px 30px;
+                          display: block;
+                          width: 100%;
+                          box-sizing: border-box;
+                        "
+                      >
+                        View document
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Project Details Box -->
+            <tr>
+              <td
+                style="
+                  background-color: #e9fbfe;
+                  padding: 20px;
+                  border-radius: 8px;
+                  margin-bottom: 30px;
+                "
+              >
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      style="
+                        font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                          Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.8;
+                        color: #000000;
+                      "
+                    >
+                      <strong>Project:</strong> ${project.name}<br />
+                      <strong>Document Type:</strong> Brand Origin<br />
+                      <strong>Date Created:</strong> ${new Date().toLocaleDateString(
+                        "en-NG",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                        }
+                      )}<br />
+                      <strong>Format:</strong> PDF Attachment
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Spacer -->
+            <tr>
+              <td height="30"></td>
+            </tr>
+
+            <!-- Next Steps -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  color: #000000;
+                  padding-bottom: 30px;
+                "
+              >
+                <strong>Next Steps:</strong> Review the attached PDF document
+                and:<br />
+                <strong>Provide</strong> feedback by replying to this email if
+                changes are needed<br />
+                <strong>Approve</strong> by replying with your approval
+              </td>
+            </tr>
+
+            <!-- Action Icons -->
+            <tr>
+              <td style="border: 2px solid #000000; padding: 0">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509014/rate-our-service-icon_leqt5l.png"
+                                alt="Rate"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Rate our<br />Service
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/recommend-icon_gl8jyy.png"
+                                alt="Follow-us-on-socials"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Follow us<br />on socials
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/visit-website-icon_wxwp4g.png"
+                                alt="Visit"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Visit our<br />website
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Info -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 20px;
+                  font-size: 10px;
+                  color: #666666;
+                  border-bottom: 1px solid #e0e0e0;
+                  padding-bottom: 20px;
+                "
+              >
+                <table width="100%">
+                  <tr>
+                    <td width="50%" valign="top">
+                      Note: this message was created automatically by Levitate's
+                      AI workflow. If this reached you by mistake, please report
+                      via email:
+                      <strong
+                        ><a
+                          href="mailto:info@levitate.ng"
+                          style="text-decoration: none; color: #666666"
+                          >info@levitate.ng</a
+                        ></strong
+                      >.
+                    </td>
+                    <td width="50%" align="right" valign="top">
+                      6A, Captain Olajide George, Lekki Phase One<br />
+                      <a
+                        href="mailto:info@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >info@levitate.ng</a
+                      >
+                      |
+                      <a
+                        href="mailto:support@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >support@levitate.ng</a
+                      >
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Logo -->
+            <tr>
+              <td style="padding-top: 20px">
+                <table width="100%">
+                  <tr>
+                    <td align="left">
+                      <a
+                        href="https://levitate.ng"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-full-logo_bs3dwx.png"
+                          alt="Levitate"
+                          width="120"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                    <td align="right">
+                      <a
+                        href="https://linkedin.com/company/levitatelagos"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                          alt="LinkedIn"
+                          width="24"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+            `;
+          } else {
+            // regeneration
+            htmlContent = `
+            <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Our updated vision for your brand</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style type="text/css">
+      body,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      ol,
+      li,
+      ul,
+      button,
+      a,
+      td {
+        font-family: "Inter Tight", Arial, "Helvetica Neue", Helvetica,
+          sans-serif;
+      }
+    </style>
+    <style>
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+
+      @media screen and (max-width: 600px) {
+        .content {
+          width: 100% !important;
+          display: block !important;
+          padding: 10px !important;
+        }
+
+        .header,
+        .body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .icon-column {
+          display: block !important;
+          width: 100% !important;
+          border-bottom: 1px solid #000;
+          border-right: none !important;
+        }
+
+        .icon-column:last-child {
+          border-bottom: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body
+    style="
+      font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    "
+  >
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 20px">
+          <table
+            class="content"
+            width="600"
+            border="0"
+            cellspacing="0"
+            cellpadding="0"
+            style="background-color: #ffffff; padding: 40px"
+          >
+            <!-- Header Logo -->
+            <tr>
+              <td align="right" style="padding-bottom: 20px">
+                <a href="https://levitate.ng" style="text-decoration: none">
+                  <img
+                    src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-short-logo_q7kxym.png"
+                    alt="Levitate Logo"
+                    width="50"
+                    style="display: block; border: 0"
+                  />
+                </a>
+              </td>
+            </tr>
+
+            <!-- Main Heading -->
+            <tr>
+              <td style="padding-bottom: 10px">
+                <h1
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 48px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #000000;
+                    line-height: 1.1;
+                  "
+                >
+                  Our updated<br />vision for your<br />brand is here.
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="padding-bottom: 30px; border-bottom: 1px solid #e0e0e0"
+              >
+                <!-- No subheader for this template as per image -->
+              </td>
+            </tr>
+
+            <!-- Greeting & Body Text -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 30px;
+                  padding-bottom: 20px;
+                  font-size: 16px;
+                  color: #000000;
+                  line-height: 1.5;
+                "
+              >
+                <p style="margin: 0 0 20px 0">Dear ${
+                  project.client?.name || "Valued Client"
+                },</p>
+                <p style="margin: 0 0 20px 0">
+                  We're excited to reshare our vision for this project. For
+                  further response and any feedback, simply reply to this email
+                  with your comments.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Button -->
+            <tr>
+              <td style="padding-bottom: 30px">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      align="center"
+                      bgcolor="#000000"
+                      style="border-radius: 8px"
+                    >
+                      <a
+                        href="${pdfFile.webViewLink}"
+                        style="
+                          font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                            Helvetica, sans-serif;
+                          font-size: 16px;
+                          font-weight: 700;
+                          color: #ffffff;
+                          text-decoration: none;
+                          padding: 15px 30px;
+                          display: block;
+                          width: 100%;
+                          box-sizing: border-box;
+                        "
+                      >
+                        View updated document
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Project Details Box -->
+            <tr>
+              <td
+                style="
+                  background-color: #e9fbfe;
+                  padding: 20px;
+                  border-radius: 8px;
+                  margin-bottom: 30px;
+                "
+              >
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      style="
+                        font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                          Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.8;
+                        color: #000000;
+                      "
+                    >
+                      <strong>Project:</strong> ${project.name}<br />
+                      <strong>Document Type:</strong> Brand Origin<br />
+                      <strong>Date Created:</strong> ${new Date().toLocaleDateString(
+                        "en-NG",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                        }
+                      )}<br />
+                      <strong>Format:</strong> PDF Attachment
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Spacer -->
+            <tr>
+              <td height="30"></td>
+            </tr>
+
+            <!-- Next Steps -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  color: #000000;
+                  padding-bottom: 30px;
+                "
+              >
+                <strong>Next Steps:</strong> Review the attached PDF document
+                and:<br />
+                <strong>Provide</strong> feedback by replying to this email if
+                changes are needed<br />
+                <strong>Approve</strong> by replying with your approval
+              </td>
+            </tr>
+
+            <!-- Action Icons -->
+            <tr>
+              <td style="border: 2px solid #000000; padding: 0">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509014/rate-our-service-icon_leqt5l.png"
+                                alt="Rate"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Rate our<br />Service
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/recommend-icon_gl8jyy.png"
+                                alt="Follow-us-on-socials"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Follow us<br />on socials
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/visit-website-icon_wxwp4g.png"
+                                alt="Visit"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Visit our<br />website
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Info -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 20px;
+                  font-size: 10px;
+                  color: #666666;
+                  border-bottom: 1px solid #e0e0e0;
+                  padding-bottom: 20px;
+                "
+              >
+                <table width="100%">
+                  <tr>
+                    <td width="50%" valign="top">
+                      Note: this message was created automatically by Levitate's
+                      AI workflow. If this reached you by mistake, please report
+                      via email:
+                      <strong
+                        ><a
+                          href="mailto:info@levitate.ng"
+                          style="text-decoration: none; color: #666666"
+                          >info@levitate.ng</a
+                        ></strong
+                      >.
+                    </td>
+                    <td width="50%" align="right" valign="top">
+                      6A, Captain Olajide George, Lekki Phase One<br />
+                      <a
+                        href="mailto:info@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >info@levitate.ng</a
+                      >
+                      |
+                      <a
+                        href="mailto:support@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >support@levitate.ng</a
+                      >
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Logo -->
+            <tr>
+              <td style="padding-top: 20px">
+                <table width="100%">
+                  <tr>
+                    <td align="left">
+                      <a
+                        href="https://levitate.ng"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-full-logo_bs3dwx.png"
+                          alt="Levitate"
+                          width="120"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                    <td align="right">
+                      <a
+                        href="https://linkedin.com/company/levitatelagos"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                          alt="LinkedIn"
+                          width="24"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+            `;
+          }
+          break;
+        case DocumentType.QUOTE:
+          // Initial generation
+          if (!isRegeneration) {
+            htmlContent = `
+            <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ready to start?</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style type="text/css">
+      body,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      ol,
+      li,
+      ul,
+      button,
+      a,
+      td {
+        font-family: "Inter Tight", Arial, "Helvetica Neue", Helvetica,
+          sans-serif;
+      }
+    </style>
+    <style>
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+
+      @media screen and (max-width: 600px) {
+        .content {
+          width: 100% !important;
+          display: block !important;
+          padding: 10px !important;
+        }
+
+        .header,
+        .body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .icon-column {
+          display: block !important;
+          width: 100% !important;
+          border-bottom: 1px solid #000;
+          border-right: none !important;
+        }
+
+        .icon-column:last-child {
+          border-bottom: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body
+    style="
+      font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    "
+  >
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 20px">
+          <table
+            class="content"
+            width="600"
+            border="0"
+            cellspacing="0"
+            cellpadding="0"
+            style="background-color: #ffffff; padding: 40px"
+          >
+            <!-- Header Logo -->
+            <tr>
+              <td align="right" style="padding-bottom: 20px">
+                <a href="https://levitate.ng" style="text-decoration: none">
+                  <img
+                    src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-short-logo_q7kxym.png"
+                    alt="Levitate Logo"
+                    width="50"
+                    style="display: block; border: 0"
+                  />
+                </a>
+              </td>
+            </tr>
+
+            <!-- Main Heading -->
+            <tr>
+              <td style="padding-bottom: 10px">
+                <h1
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 48px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #000000;
+                    line-height: 1.1;
+                  "
+                >
+                  Ready to start?
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="padding-bottom: 30px; border-bottom: 1px solid #e0e0e0"
+              >
+                <h2
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 28px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #00b9f0;
+                    line-height: 1.2;
+                  "
+                >
+                  Our cost estimate is<br />attached for your review
+                </h2>
+              </td>
+            </tr>
+
+            <!-- Greeting & Body Text -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 30px;
+                  padding-bottom: 20px;
+                  font-size: 16px;
+                  color: #000000;
+                  line-height: 1.5;
+                "
+              >
+                <p style="margin: 0 0 20px 0">Dear ${
+                  project.client?.name || "Valued Client"
+                },</p>
+                <p style="margin: 0 0 20px 0">
+                  Here's our cost estimate for the project — feel free to review
+                  and tell us any changes you'd like. Once we've aligned on the
+                  details, we'll issue the invoice. Please reply with your
+                  feedback.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Button -->
+            <tr>
+              <td style="padding-bottom: 30px">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      align="center"
+                      bgcolor="#000000"
+                      style="border-radius: 8px"
+                    >
+                      <a
+                        href="${pdfFile.webViewLink}"
+                        style="
+                          font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                            Helvetica, sans-serif;
+                          font-size: 16px;
+                          font-weight: 700;
+                          color: #ffffff;
+                          text-decoration: none;
+                          padding: 15px 30px;
+                          display: block;
+                          width: 100%;
+                          box-sizing: border-box;
+                        "
+                      >
+                        View Cost estimate
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Project Details Box -->
+            <tr>
+              <td
+                style="
+                  background-color: #e9fbfe;
+                  padding: 20px;
+                  border-radius: 8px;
+                  margin-bottom: 30px;
+                "
+              >
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      style="
+                        font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                          Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.8;
+                        color: #000000;
+                      "
+                    >
+                      <strong>Project:</strong> ${project.name}<br />
+                      <strong>Document Type:</strong> Quotation for service<br />
+                      <strong>Date Created:</strong> ${new Date().toLocaleDateString(
+                        "en-NG",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                        }
+                      )}<br />
+                      <strong>Format:</strong> PDF Attachment
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Spacer -->
+            <tr>
+              <td height="30"></td>
+            </tr>
+
+            <!-- Next Steps -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  color: #000000;
+                  padding-bottom: 30px;
+                "
+              >
+                <strong>Next Steps:</strong> Review the attached PDF document
+                and:<br />
+                <strong>Provide</strong> feedback by replying to this email if
+                changes are needed<br />
+                <strong>Approve</strong> by replying with your approval
+              </td>
+            </tr>
+
+            <!-- Action Icons -->
+            <tr>
+              <td style="border: 2px solid #000000; padding: 0">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509014/rate-our-service-icon_leqt5l.png"
+                                alt="Rate"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Rate our<br />Service
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/recommend-icon_gl8jyy.png"
+                                alt="Follow-us-on-socials"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Follow us<br />on socials
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/visit-website-icon_wxwp4g.png"
+                                alt="Visit"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Visit our<br />website
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Info -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 20px;
+                  font-size: 10px;
+                  color: #666666;
+                  border-bottom: 1px solid #e0e0e0;
+                  padding-bottom: 20px;
+                "
+              >
+                <table width="100%">
+                  <tr>
+                    <td width="50%" valign="top">
+                      Note: this message was created automatically by Levitate's
+                      AI workflow. If this reached you by mistake, please report
+                      via email:
+                      <strong
+                        ><a
+                          href="mailto:info@levitate.ng"
+                          style="text-decoration: none; color: #666666"
+                          >info@levitate.ng</a
+                        ></strong
+                      >.
+                    </td>
+                    <td width="50%" align="right" valign="top">
+                      6A, Captain Olajide George, Lekki Phase One<br />
+                      <a
+                        href="mailto:info@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >info@levitate.ng</a
+                      >
+                      |
+                      <a
+                        href="mailto:support@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >support@levitate.ng</a
+                      >
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Logo -->
+            <tr>
+              <td style="padding-top: 20px">
+                <table width="100%">
+                  <tr>
+                    <td align="left">
+                      <a
+                        href="https://levitate.ng"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-full-logo_bs3dwx.png"
+                          alt="Levitate"
+                          width="120"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                    <td align="right">
+                      <a
+                        href="https://linkedin.com/company/levitatelagos"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                          alt="LinkedIn"
+                          width="24"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+            `;
+          } else {
+            // regeneration
+
+            htmlContent = `
+            <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Update! The revised cost estimate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style type="text/css">
+      body,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      ol,
+      li,
+      ul,
+      button,
+      a,
+      td {
+        font-family: "Inter Tight", Arial, "Helvetica Neue", Helvetica,
+          sans-serif;
+      }
+    </style>
+    <style>
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+
+      @media screen and (max-width: 600px) {
+        .content {
+          width: 100% !important;
+          display: block !important;
+          padding: 10px !important;
+        }
+
+        .header,
+        .body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .icon-column {
+          display: block !important;
+          width: 100% !important;
+          border-bottom: 1px solid #000;
+          border-right: none !important;
+        }
+
+        .icon-column:last-child {
+          border-bottom: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body
+    style="
+      font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    "
+  >
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 20px">
+          <table
+            class="content"
+            width="600"
+            border="0"
+            cellspacing="0"
+            cellpadding="0"
+            style="background-color: #ffffff; padding: 40px"
+          >
+            <!-- Header Logo -->
+            <tr>
+              <td align="right" style="padding-bottom: 20px">
+                <a href="https://levitate.ng" style="text-decoration: none">
+                  <img
+                    src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-short-logo_q7kxym.png"
+                    alt="Levitate Logo"
+                    width="50"
+                    style="display: block; border: 0"
+                  />
+                </a>
+              </td>
+            </tr>
+
+            <!-- Main Heading -->
+            <tr>
+              <td style="padding-bottom: 10px">
+                <h1
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 48px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #000000;
+                    line-height: 1.1;
+                  "
+                >
+                  Update!
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="padding-bottom: 30px; border-bottom: 1px solid #e0e0e0"
+              >
+                <h2
+                  style="
+                    font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                      Helvetica, sans-serif;
+                    font-size: 28px;
+                    font-weight: 700;
+                    margin: 0;
+                    color: #00b9f0;
+                    line-height: 1.2;
+                  "
+                >
+                  The revised cost estimate is<br />attached for your review
+                </h2>
+              </td>
+            </tr>
+
+            <!-- Greeting & Body Text -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 30px;
+                  padding-bottom: 20px;
+                  font-size: 16px;
+                  color: #000000;
+                  line-height: 1.5;
+                "
+              >
+                <p style="margin: 0 0 20px 0">Dear ${
+                  project.client?.name || "Valued Client"
+                },</p>
+                <p style="margin: 0 0 20px 0">
+                  Based on your feedback, an revised cost estimate for the
+                  project is attached. Once we've aligned on the details, we'll
+                  issue the invoice. Please reply with your feedback.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Button -->
+            <tr>
+              <td style="padding-bottom: 30px">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      align="center"
+                      bgcolor="#000000"
+                      style="border-radius: 8px"
+                    >
+                      <a
+                        href="${pdfFile.webViewLink}"
+                        style="
+                          font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                            Helvetica, sans-serif;
+                          font-size: 16px;
+                          font-weight: 700;
+                          color: #ffffff;
+                          text-decoration: none;
+                          padding: 15px 30px;
+                          display: block;
+                          width: 100%;
+                          box-sizing: border-box;
+                        "
+                      >
+                        View Cost estimate
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Project Details Box -->
+            <tr>
+              <td
+                style="
+                  background-color: #e9fbfe;
+                  padding: 20px;
+                  border-radius: 8px;
+                  margin-bottom: 30px;
+                "
+              >
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      style="
+                        font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                          Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.8;
+                        color: #000000;
+                      "
+                    >
+                      <strong>Project:</strong> ${project.name}<br />
+                      <strong>Document Type:</strong> Quotation for service<br />
+                      <strong>Date Created:</strong> ${new Date().toLocaleDateString(
+                        "en-NG",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                        }
+                      )}<br />
+                      <strong>Format:</strong> PDF Attachment
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Spacer -->
+            <tr>
+              <td height="30"></td>
+            </tr>
+
+            <!-- Next Steps -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  color: #000000;
+                  padding-bottom: 30px;
+                "
+              >
+                <strong>Next Steps:</strong> Review the attached PDF document
+                and:<br />
+                <strong>Provide</strong> feedback by replying to this email if
+                changes are needed<br />
+                <strong>Approve</strong> by replying with your approval
+              </td>
+            </tr>
+
+            <!-- Action Icons -->
+            <tr>
+              <td style="border: 2px solid #000000; padding: 0">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509014/rate-our-service-icon_leqt5l.png"
+                                alt="Rate"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Rate our<br />Service
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/recommend-icon_gl8jyy.png"
+                                alt="Follow-us-on-socials"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Follow us<br />on socials
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/visit-website-icon_wxwp4g.png"
+                                alt="Visit"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Visit our<br />website
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Info -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 20px;
+                  font-size: 10px;
+                  color: #666666;
+                  border-bottom: 1px solid #e0e0e0;
+                  padding-bottom: 20px;
+                "
+              >
+                <table width="100%">
+                  <tr>
+                    <td width="50%" valign="top">
+                      Note: this message was created automatically by Levitate's
+                      AI workflow. If this reached you by mistake, please report
+                      via email:
+                      <strong
+                        ><a
+                          href="mailto:info@levitate.ng"
+                          style="text-decoration: none; color: #666666"
+                          >info@levitate.ng</a
+                        ></strong
+                      >.
+                    </td>
+                    <td width="50%" align="right" valign="top">
+                      6A, Captain Olajide George, Lekki Phase One<br />
+                      <a
+                        href="mailto:info@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >info@levitate.ng</a
+                      >
+                      |
+                      <a
+                        href="mailto:support@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >support@levitate.ng</a
+                      >
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Logo -->
+            <tr>
+              <td style="padding-top: 20px">
+                <table width="100%">
+                  <tr>
+                    <td align="left">
+                      <a
+                        href="https://levitate.ng"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-full-logo_bs3dwx.png"
+                          alt="Levitate"
+                          width="120"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                    <td align="right">
+                      <a
+                        href="https://linkedin.com/company/levitatelagos"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                          alt="LinkedIn"
+                          width="24"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+            `;
+          }
+          break;
+
+        default:
+          htmlContent = `
+            <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Our Vision for your brand</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style type="text/css">
+      body,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      ol,
+      li,
+      ul,
+      button,
+      a,
+      td {
+        font-family: "Inter Tight", Arial, "Helvetica Neue", Helvetica,
+          sans-serif;
+      }
+    </style>
+    <style>
+      a {
+        text-decoration: none;
+        color: inherit;
+      }
+
+      @media screen and (max-width: 600px) {
+        .content {
+          width: 100% !important;
+          display: block !important;
+          padding: 10px !important;
+        }
+
+        .header,
+        .body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .icon-column {
+          display: block !important;
+          width: 100% !important;
+          border-bottom: 1px solid #000;
+          border-right: none !important;
+        }
+
+        .icon-column:last-child {
+          border-bottom: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body
+    style="
+      font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    "
+  >
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center" style="padding: 20px">
+          <table
+            class="content"
+            width="600"
+            border="0"
+            cellspacing="0"
+            cellpadding="0"
+            style="background-color: #ffffff; padding: 40px"
+          >
+            <!-- Header Logo -->
+            <tr>
+              <td align="right" style="padding-bottom: 20px">
+                <a href="https://levitate.ng" style="text-decoration: none">
+                  <img
+                    src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-short-logo_q7kxym.png"
+                    alt="Levitate Logo"
+                    width="50"
+                    style="display: block; border: 0"
+                  />
+                </a>
+              </td>
+            </tr>
+
+            <!-- Greeting & Body Text -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 30px;
+                  padding-bottom: 20px;
+                  font-size: 16px;
+                  color: #000000;
+                  line-height: 1.5;
+                "
+              >
+                <p style="margin: 0 0 20px 0">Dear ${
+                  project.client?.name || "Valued Client"
+                },</p>
+                <p style="margin: 0 0 20px 0">
+                  We're excited to share the <b>${documentTypeName}</b> for this project. For response and any feedback, simply reply to this
+                  email with your comments.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Button -->
+            <tr>
+              <td style="padding-bottom: 30px">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      align="center"
+                      bgcolor="#000000"
+                      style="border-radius: 8px"
+                    >
+                      <a
+                        href="${pdfFile.webViewLink}"
+                        style="
+                          font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                            Helvetica, sans-serif;
+                          font-size: 16px;
+                          font-weight: 700;
+                          color: #ffffff;
+                          text-decoration: none;
+                          padding: 15px 30px;
+                          display: block;
+                          width: 100%;
+                          box-sizing: border-box;
+                        "
+                      >
+                        View document
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Project Details Box -->
+            <tr>
+              <td
+                style="
+                  background-color: #e9fbfe;
+                  padding: 20px;
+                  border-radius: 8px;
+                  margin-bottom: 30px;
+                "
+              >
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      style="
+                        font-family: 'Inter Tight', Arial, 'Helvetica Neue',
+                          Helvetica, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.8;
+                        color: #000000;
+                      "
+                    >
+                      <strong>Project:</strong> ${project.name}<br />
+                      <strong>Document Type:</strong> ${documentTypeName}<br />
+                      <strong>Date Created:</strong> ${new Date().toLocaleDateString(
+                        "en-NG",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                        }
+                      )}<br />
+                      <strong>Format:</strong> PDF Attachment
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Spacer -->
+            <tr>
+              <td height="30"></td>
+            </tr>
+
+            <!-- Next Steps -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  color: #000000;
+                  padding-bottom: 30px;
+                "
+              >
+                <strong>Next Steps:</strong> Review the attached PDF document
+                and:<br />
+                <strong>Provide</strong> feedback by replying to this email if
+                changes are needed<br />
+                <strong>Approve</strong> by replying with your approval
+              </td>
+            </tr>
+
+            <!-- Action Icons -->
+            <tr>
+              <td style="border: 2px solid #000000; padding: 0">
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                  <tr>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509014/rate-our-service-icon_leqt5l.png"
+                                alt="Rate"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng/rate-us"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Rate our<br />Service
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px; border-right: 1px solid #000000"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/recommend-icon_gl8jyy.png"
+                                alt="Follow-us-on-socials"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://www.instagram.com/levitatelagos"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Follow us<br />on socials
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td
+                      class="icon-column"
+                      width="33%"
+                      align="center"
+                      style="padding: 20px"
+                    >
+                      <table
+                        border="0"
+                        cellspacing="0"
+                        cellpadding="0"
+                        align="center"
+                      >
+                        <tr>
+                          <td style="padding-right: 10px">
+                            <a
+                              href="https://levitate.ng"
+                              style="text-decoration: none"
+                            >
+                              <img
+                                src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/visit-website-icon_wxwp4g.png"
+                                alt="Visit"
+                                width="30"
+                                style="display: block; border: 0"
+                              />
+                            </a>
+                          </td>
+                          <td
+                            style="
+                              font-family: 'Inter Tight', Arial,
+                                'Helvetica Neue', Helvetica, sans-serif;
+                              font-weight: 700;
+                              font-size: 14px;
+                              line-height: 1.2;
+                              text-align: left;
+                              color: #000000;
+                            "
+                          >
+                            <a
+                              href="https://levitate.ng"
+                              style="
+                                font-family: 'Inter Tight', Arial,
+                                  'Helvetica Neue', Helvetica, sans-serif;
+                                text-decoration: none;
+                                color: #000000;
+                              "
+                            >
+                              Visit our<br />website
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Info -->
+            <tr>
+              <td
+                style="
+                  font-family: 'Inter Tight', Arial, 'Helvetica Neue', Helvetica,
+                    sans-serif;
+                  padding-top: 20px;
+                  font-size: 10px;
+                  color: #666666;
+                  border-bottom: 1px solid #e0e0e0;
+                  padding-bottom: 20px;
+                "
+              >
+                <table width="100%">
+                  <tr>
+                    <td width="50%" valign="top">
+                      Note: this message was created automatically by Levitate's
+                      AI workflow. If this reached you by mistake, please report
+                      via email:
+                      <strong
+                        ><a
+                          href="mailto:info@levitate.ng"
+                          style="text-decoration: none; color: #666666"
+                          >info@levitate.ng</a
+                        ></strong
+                      >.
+                    </td>
+                    <td width="50%" align="right" valign="top">
+                      6A, Captain Olajide George, Lekki Phase One<br />
+                      <a
+                        href="mailto:info@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >info@levitate.ng</a
+                      >
+                      |
+                      <a
+                        href="mailto:support@levitate.ng"
+                        style="text-decoration: none; color: #666666"
+                        >support@levitate.ng</a
+                      >
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer Logo -->
+            <tr>
+              <td style="padding-top: 20px">
+                <table width="100%">
+                  <tr>
+                    <td align="left">
+                      <a
+                        href="https://levitate.ng"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://res.cloudinary.com/dkusm9sxx/image/upload/v1766509013/levitate-full-logo_bs3dwx.png"
+                          alt="Levitate"
+                          width="120"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                    <td align="right">
+                      <a
+                        href="https://linkedin.com/company/levitatelagos"
+                        style="text-decoration: none"
+                      >
+                        <img
+                          src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                          alt="LinkedIn"
+                          width="24"
+                          style="display: block"
+                        />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
+            `;
+      }
 
       logger.debug({
         message: "Generated client document email template",
