@@ -4,8 +4,8 @@
   "description": "AI agent for automating client project workflows from questionnaire to finalization",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/process-manager.js",
+    "dev": "node api.js && nodemon src/server.js",
+    "start": "node api.js && node src/process-manager.js",
     "start:worker": "node src/workers/index.js",
     "dev:worker": "nodemon src/workers/index.js",
     "monitor": "node src/monitoring/queueMonitor.js",
